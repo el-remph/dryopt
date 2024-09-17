@@ -18,7 +18,10 @@ Features
   of unchecked atoi(3) anyway)
 - Like with [Perl's Getopt::Long], option argument types mean that arguments
   can be clearly distinguished from option characters, and inserted into a
-  bundled string. For example, `-w77 -g75 -p#` can become `-w77g75p#`.
+  bundled string. For example, `-w77 -g75 -p#` can become `-w77g75p#`. Even
+  for optional arguments, given that `-a` takes an optional FLOATING argument,
+  `-a12.008e2b` sets `-a` to 1200.8, while `-ab` sets `-a` to 0 (both set
+  `-b`).
 - wchar_t options allowed (UTF-32 on sane systems, UCS-2 on W*ndows);
   respects locale
 - Not too intrusive with the globals
@@ -26,6 +29,7 @@ Features
 - Single-{source,header,object}
 
 [Perl's Getopt::Long]: https://metacpan.org/dist/Getopt-Long
+[argp]: https://sourceware.org/glibc/manual/latest/html_node/Argp.html
 
 
 Requirements (minimal)
@@ -56,8 +60,12 @@ Missing features (may or may not be implemented later)
   [popt]\(3) instead
 - getopt_long_only(3)-style single dash parsing
 
-[argp]: https://sourceware.org/glibc/manual/latest/html_node/Argp.html
 [popt]: https://github.com/rpm-software-management/popt
+
+
+Example
+-------
+See [tests/test-bin.c](tests/test-bin.c).
 
 
 Copyright

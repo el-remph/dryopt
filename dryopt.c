@@ -360,13 +360,14 @@ found:	if (opts[opti].arg == BOOLEAN) {
 		}
 		parse_optarg(opts + opti, NULL);
 	} else {
-		char *const og_long_arg = long_arg;
+		char * og_long_arg;
 
-		if (!long_arg && !(long_arg = argv[argi++])) {
+		if (!long_arg && !opts[opti].optional && !(long_arg = argv[argi++])) {
 arg_not_found:		ERR("missing argument for --%s", longopt);
 			return argi;
 		}
 
+		og_long_arg = long_arg,
 		long_arg = parse_optarg(opts + opti, long_arg);
 		if (!long_arg)
 			goto arg_not_found;
@@ -414,7 +415,7 @@ parse_shortopts(char *const argv[], struct dryopt const opts[], size_t const opt
 found:		if (opts[opti].arg != BOOLEAN) {
 			switch (*optstr) {
 			case '\0':
-				if (!(optstr = argv[argi++]))
+				if (!opts[opti].optional && !(optstr = argv[argi++]))
 					goto arg_not_found;
 				break;
 			case '=': case ':':
