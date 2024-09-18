@@ -1,16 +1,32 @@
 #!/bin/sh
-set -eux
+set -eu
 
-# The formatting of these may look odd, but it's to make the shell xtrace
-# output more legible
-test "
-`./$1 -nbv32767sstring foo bar`" = "
--v 32767	-b 0	-s string	-n 1	-F 0
-arguments after options:	foo	bar"
-test "
-`./$1 -nv-32768 --no-flag -- -bar foo mung`" = "
--v -32768	-b 1	-s (null)	-n 0	-F 0
-arguments after options:	-bar	foo	mung"
+exe=./$1
+
+do_test() {
+	expectation=$1
+	shift
+	echo >&2 "Testing: $*"
+	if reality=`$exe "$@"`; then :; else # preserve $? without triggering errexit
+		code=$?
+		echo >&2 "$exe $*: exit $code"
+		return $code
+	fi
+	if test "$expectation" != "$reality"; then
+		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+			"$exe $*" "$expectation" "$reality"
+		return 1
+	fi
+	return 0
+}
+
+do_test '-v 32767	-b 0	-s string	-n 1	-F 0
+arguments after options:	foo	bar'	\
+	-nbv32767sstring foo bar
+
+do_test '-v -32768	-b 1	-s (null)	-n 0	-F 0
+arguments after options:	-bar	foo	mung'	\
+	-nv-32768 --no-flag -- -bar foo mung
 
 export LANG=C
 if type errno >/dev/null 2>&1; then
@@ -19,11 +35,17 @@ else
 	erange_str='Numerical result out of range'
 fi
 
-for toobig in 32768 -32769; do
+# overflow tests
+for i in 32768 -32769; do
 	# The negation ensures `set -e' interprets this right -- the command
 	# must fail, and shell errexit triggers if it doesn't; stderr is captured
-	stderr_contents=`! ./$1 --value:$toobig 2>&1 >/dev/null`
-	test "$stderr_contents" = "./$1: $toobig: $erange_str"
+	stderr_contents=`! $exe --value:$i 2>&1 >/dev/null`
+	expected="./$1: $i: $erange_str"
+	if test "$stderr_contents" != "$expected"; then
+		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+			"$exe --value:$i" "$expected" "$stderr_contents"
+		exit 1
+	fi
 done
 
 help_output="\
@@ -34,30 +56,33 @@ Usage: ./tests/test-bin [OPTS] [ARGS]
   -s, --strarg=[STR]	set strarg
   -n, --flag	boolean; takes no argument
   -F, --float=FLOATING	set fl (double)"
+do_test "$help_output" -h
+do_test "$help_output" '-?'
+do_test "$help_output" --help
 
-test "`./$1 -h`" = "$help_output"
-test "`./$1 -\?`" = "$help_output"
-test "`./$1 --help`" = "$help_output"
+# Distinguishing optional arguments
+for i in '-b -n' '--bigvalue --flag'; do
+	do_test '-v 0	-b 0	-s (null)	-n 1	-F 0
+arguments after options:'	\
+		$i
+done
+for i in '-b 0777 -n' '--bigvalue 0777 --flag'; do
+	do_test '-v 0	-b 511	-s (null)	-n 1	-F 0
+arguments after options:'	\
+		$i
+done
 
-test "
-`./$1 -b -n`" = "
--v 0	-b 0	-s (null)	-n 1	-F 0
-arguments after options:"
-test "
-`./$1 -b 0777 -n`" = "
--v 0	-b 511	-s (null)	-n 1	-F 0
-arguments after options:"
-test "
-`./$1 --bigvalue --flag`" = "
--v 0	-b 0	-s (null)	-n 1	-F 0
-arguments after options:"
-test "
-`./$1 --bigvalue 0777 --flag`" = "
--v 0	-b 511	-s (null)	-n 1	-F 0
-arguments after options:"
+do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
+arguments after options:	--flag'	\
+	--bigvalue -- --flag
+do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
+arguments after options:	-n'	\
+	-b -- -n
 
 # Don't segfault on a trailing option with optional argument and no argument
 # given
-./$1 -b >/dev/null
-./$1 --bigvalue >/dev/null
-./$1 --bigvalue= >/dev/null
+for i in -b --bigvalue --bigvalue=; do
+	do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
+arguments after options:'	\
+		$i
+done
