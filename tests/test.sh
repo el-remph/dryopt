@@ -33,7 +33,8 @@ Usage: ./tests/test-bin [OPTS] [ARGS]
   -c, --callback=[ARG]	call callback
   -s, --strarg=[STR]	set strarg
   -n, --flag	boolean; takes no argument
-  -F, --float=FLOATING	set fl (double)"
+  -F, --float=FLOATING	set fl (double)
+  -e, --enum=never,auto,always"
 
 test "`./$1 -h`" = "$help_output"
 test "`./$1 --help`" = "$help_output"
