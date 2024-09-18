@@ -13,7 +13,7 @@ struct dryopt {
 	wchar_t shortopt;
 	char const *restrict longopt, *restrict helpstr;
 	void * argptr;	/* type pointed to depends on .arg */
-	enum {
+	enum dryarg {
 		BOOLEAN = 0, STR, CHAR, SIGNED, UNSIGNED,
 		FLOATING,	/* note that this only works for the (typically)
 				   IEEE binary formats, not DFP (C23 _Decimal*) */

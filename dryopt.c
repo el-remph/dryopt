@@ -163,58 +163,58 @@ copy_word(void *restrict dest, size_t const destz, void const *restrict src, siz
 }
 
 static void
-write_optarg(struct dryopt const *restrict const opt, union parsed_optarg arg)
+write_optarg(struct dryopt const *restrict const opt, union parsed_optarg const *restrict const arg)
 {
 	switch (opt->arg) {
 		// Sometimes .sizeof_arg is ignored. You were warned!
 	case BOOLEAN:
-		assert(arg.i == !!arg.i);
-		copy_word(opt->argptr, opt->sizeof_arg, &arg, sizeof arg.i);
+		assert(arg->u == !!arg->u);
+		copy_word(opt->argptr, opt->sizeof_arg, arg, sizeof arg->u);
 		break;
 	case STR:
-		*(void**)opt->argptr = arg.p;
+		*(void**)opt->argptr = arg->p;
 		break;
 	case CHAR:
 		/* again, this is unsigned to avoid sign extension. Why don't
 		   I just add a field to the union? */
-		assert(arg.u <= UCHAR_MAX);
-		*(unsigned char*)opt->argptr = (unsigned char)arg.u;
+		assert(arg->u <= UCHAR_MAX);
+		*(unsigned char*)opt->argptr = (unsigned char)arg->u;
 		break;
 
 	case SIGNED: case UNSIGNED:
-		/* We don't use sizeof arg here because arg.f could be 12
-		   or 16 bytes, while arg.i and arg.u is typically 8 */
-		if (sizeof arg.i != opt->sizeof_arg) {
-			assert(sizeof arg.i > opt->sizeof_arg);
-			if (!fits_in_bits(arg.u, opt->sizeof_arg * CHAR_BIT, opt->arg == SIGNED)) {
+		/* We don't use sizeof arg here because arg->f could be 12
+		   or 16 bytes, while arg->i and arg->u is typically 8 */
+		if (sizeof arg->i != opt->sizeof_arg) {
+			assert(sizeof arg->i > opt->sizeof_arg);
+			if (!fits_in_bits(arg->u, opt->sizeof_arg * CHAR_BIT, opt->arg == SIGNED)) {
 				/* signed output should always make sense here,
 				   since overflow of the long long sign bit is
 				   tested by strtoll(3) earlier */
-				ERR("%lld: %s", arg.i, strerror(ERANGE));
+				ERR("%lld: %s", arg->i, strerror(ERANGE));
 				return;
 			}
 		}
-		copy_word(opt->argptr, opt->sizeof_arg, &arg, sizeof arg.u);
+		copy_word(opt->argptr, opt->sizeof_arg, arg, sizeof arg->u);
 		break;
 
 	case FLOATING:
 		// floating point format is not as simple as integral :(
-		if (sizeof arg.f == opt->sizeof_arg)
-			*(long double*)opt->argptr = arg.f;
+		if (sizeof arg->f == opt->sizeof_arg)
+			*(long double*)opt->argptr = arg->f;
 		else {
 			long double const
 				max = opt->sizeof_arg == sizeof(float) ? FLT_MAX : DBL_MAX;
 			// TODO: what about subnormal values?
-			if (isfinite(arg.f) && (arg.f > max || arg.f < -max)) {
-				ERR("%Lg: %s", arg.f, strerror(ERANGE));
+			if (isfinite(arg->f) && (arg->f > max || arg->f < -max)) {
+				ERR("%Lg: %s", arg->f, strerror(ERANGE));
 				return;
 			}
 			switch (opt->sizeof_arg) {
 			case sizeof(float):
-				*(float*)opt->argptr = (float)arg.f;
+				*(float*)opt->argptr = (float)arg->f;
 				break;
 			case sizeof(double):
-				*(double*)opt->argptr = (double)arg.f;
+				*(double*)opt->argptr = (double)arg->f;
 				break;
 			default:
 				abort();
@@ -228,29 +228,29 @@ write_optarg(struct dryopt const *restrict const opt, union parsed_optarg arg)
 }
 
 static char *
-parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr)
+parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
+		union parsed_optarg *restrict const parsed)
 /* returns optstr after the argument was parsed, or NULL if no argument was
    parsed */
 {
-	union parsed_optarg parsed;
 	bool arg_found = false;
 
 	switch (opt->arg) {
 	case BOOLEAN:
 		/* boolean short options take no argument. TODO: what
 		   about unsetting? */
-		parsed.i = 1;
+		parsed->i = 1;
 		arg_found = true;
 		break;
 	case STR:
-		parsed.p = optstr,
+		parsed->p = optstr,
 		optstr += strlen(optstr),	// STR consumes the whole rest of the string
 		arg_found = true;
 		break;
 	case CHAR:
 		if (*optstr)
 			// cast is to avoid sign extension
-			parsed.u = (unsigned char)*optstr++,
+			parsed->u = (unsigned char)*optstr++,
 			arg_found = true;
 		break;
 	case SIGNED: case UNSIGNED: case FLOATING:
@@ -259,13 +259,13 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr)
 			errno = 0;
 			switch (opt->arg) {
 			case SIGNED:
-				parsed.i = strtoll(optstr, &endptr, 0);
+				parsed->i = strtoll(optstr, &endptr, 0);
 				break;
 			case UNSIGNED:
-				parsed.u = strtoull(optstr, &endptr, 0);
+				parsed->u = strtoull(optstr, &endptr, 0);
 				break;
 			case FLOATING:
-				parsed.f = strtold(optstr, &endptr);
+				parsed->f = strtold(optstr, &endptr);
 				break;
 			default:
 				abort();
@@ -288,13 +288,18 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr)
 		abort();
 	}
 
-	if (arg_found)
-		write_optarg(opt, parsed);
-	else if (opt->optional)
-		memset(opt->argptr, 0, opt->sizeof_arg);
-	else
-		return NULL;
-	return optstr;
+	return arg_found ? optstr : NULL;
+}
+
+static bool __attribute__((__const__))
+is_strictly_defined(enum dryarg const type)
+{
+	switch (type) {
+	case SIGNED: case UNSIGNED: case FLOATING: // what about CALLBACK?
+		return true;
+	default:
+		return false;
+	}
 }
 
 // Returns n of arguments consumed from argv
@@ -308,9 +313,8 @@ parse_longopt(char *const argv[], struct dryopt const opts[], size_t const optn)
 	char	*restrict longopt = argv[argi++],
 		* long_arg = NULL;
 
-	if (*longopt == '-')
-		if (*++longopt == '-')
-			longopt++;
+	if (*longopt == '-' && *++longopt == '-')
+		longopt++;
 
 	{
 		// find argument
@@ -346,34 +350,53 @@ parse_longopt(char *const argv[], struct dryopt const opts[], size_t const optn)
 		auto_help(opts, optn, stdout, prognam, NULL, NULL);
 		exit(EXIT_SUCCESS);
 	}
-/*	if (strcmp(longopt, "version") == 0)
-		auto_version(); */
 	ERR("unrecognised long option: %s", longopt);
 	return argi;
 
 	// inaccessible except by goto label:
-found:	if (opts[opti].arg == BOOLEAN) {
-		if (long_arg) {
-			// TODO: parse yes|no|true|false|[10] as an argument
+found:	if (opts[opti].arg == BOOLEAN)
+		if (long_arg) // TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
-			return argi;
+		else {
+			union parsed_optarg parsed = {1};
+			write_optarg(opts + opti, &parsed);
 		}
-		parse_optarg(opts + opti, NULL);
-	} else {
-		char * og_long_arg;
+	else {
+		char * og_long_arg = long_arg;
+		union parsed_optarg parsed;
 
-		if (!long_arg && !opts[opti].optional && !(long_arg = argv[argi++])) {
+		/* TODO: redundancy between this and the equivalent code in
+		   parse_shortopts(); move out and merge into a function */
+		if (long_arg)
+thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
+		else {
+			if (opts[opti].optional) {
+				// peek at next arg (argi was already incremented)
+				if (is_strictly_defined(opts[opti].arg) && argv[argi]) {
+					long_arg = parse_optarg(opts + opti, argv[argi], &parsed);
+					if (long_arg && !*long_arg)
+						og_long_arg = argv[argi++];
+					else
+						long_arg = og_long_arg; // is this necessary?
+				}
+			} else if ((long_arg = argv[argi++]))
+				goto thru;
+			else
+				goto arg_not_found;
+		}
+
+		if (long_arg) {
+			write_optarg(opts + opti, &parsed);
+			if (*long_arg)
+				ERR("trailing junk after %tu bytes of argument to --%s: %s",
+					og_long_arg - long_arg, longopt, og_long_arg);
+					// TODO: shouldn't this return?
+		} else if (opts[opti].optional)
+			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+		else {
 arg_not_found:		ERR("missing argument for --%s", longopt);
 			return argi;
 		}
-
-		og_long_arg = long_arg,
-		long_arg = parse_optarg(opts + opti, long_arg);
-		if (!long_arg)
-			goto arg_not_found;
-		if (*long_arg)
-			ERR("trailing junk after %tu bytes of argument to --%s: %s",
-				og_long_arg - long_arg, longopt, og_long_arg);
 	}
 
 	return argi;
@@ -404,35 +427,68 @@ parse_shortopts(char *const argv[], struct dryopt const opts[], size_t const opt
 				goto found;
 
 		// fallen through at end of loop: not found
-		if (wc == L'h' || wc == L'?') {
+		switch (wc) {
+		case L'h': case L'?':
 			auto_help(opts, optn, stdout, prognam, NULL, NULL);
 			exit(EXIT_SUCCESS);
+		default:
+			ERR("unrecognised option: %lc", wc);
+			continue;
 		}
-		ERR("unrecognised option: %lc", wc);
-		continue;
+
+found:		union parsed_optarg parsed;
+		char * new_optstr = NULL;
 
 		// Now we go back to multibyte processing
-found:		if (opts[opti].arg != BOOLEAN) {
-			switch (*optstr) {
-			case '\0':
-				if (!opts[opti].optional && !(optstr = argv[argi++]))
-					goto arg_not_found;
-				break;
-			case '=': case ':':
-				optstr++;
+
+		/* An earlier version of this used gotos to skip extraneous
+		   tests (like setting new_optstr to NULL, then immediately
+		   zero-testing it). Those branches were probably less
+		   performant than referring to the same register or even
+		   flags twice; a compiler could even optimise some cases
+		   out. Moreover, this version is less unreadable
+		        ^ That was premature. This is not pretty. TODO: function */
+		if (opts[opti].arg != BOOLEAN && !*optstr) {
+			if (opts[opti].optional) {
+				// peek at next arg (argi was already incremented)
+				if (is_strictly_defined(opts[opti].arg) && argv[argi]) {
+					new_optstr = parse_optarg(opts + opti, argv[argi], &parsed);
+					/* if the whole of the next arg was
+					   successfully consumed, make the peekahead
+					   increment official and permanent, but don't
+					   set optstr or this will loop onto next arg */
+					if (new_optstr) {
+						if (!*new_optstr)
+							argi++;
+						else
+							new_optstr = NULL; // it never happened
+					}
+				}
+			} else {
+				optstr = argv[argi++]; // leave new_optstr as NULL
+				goto thru;
 			}
+		} else {
+thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
+			/* argi wasn't advanced, new_optstr is just part of
+			   optstr, so advance optstr */
+			if (new_optstr)
+				optstr = new_optstr;
 		}
 
-		if (!(optstr = parse_optarg(opts + opti, optstr))) {
-arg_not_found:		ERR("missing %s arg to -%lc",
+		if (new_optstr) {
+			write_optarg(opts + opti, &parsed);
+			if (argi > 1 && optstr && *optstr) {
+				ERR("trailing junk after %td bytes of argument to -%lc: %s",
+					optstr - argv[argi - 1], wc, argv[argi - 1]);
+				return argi;
+			}
+		} else if (opts[opti].optional)
+			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+		else {
+			ERR("missing %s arg to -%lc",
 				opts[opti].arg == CALLBACK ? "" : enumarg2str[opts[opti].arg],
 				wc);
-			return argi;
-		}
-
-		if (argi > 1 && optstr && *optstr) {
-			ERR("trailing junk after %tu bytes of argument to -%lc: %s",
-				optstr - argv[argi - 1], wc, argv[argi - 1]);
 			return argi;
 		}
 	}
