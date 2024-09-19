@@ -14,7 +14,7 @@ struct dryopt {
 	wchar_t shortopt;
 	char const *restrict longopt, *restrict helpstr;
 
-	enum {
+	enum dryarg_tag {
 		STR, CHAR, SIGNED,
 		UNSIGNED,	/* applies to _Bool */
 		FLOATING,	/* note that this only works for the (typically)

@@ -37,4 +37,28 @@ Usage: ./tests/test-bin [OPTS] [ARGS]
   -e, --enum=never,auto,always"
 
 test "`./$1 -h`" = "$help_output"
+test "`./$1 -\?`" = "$help_output"
 test "`./$1 --help`" = "$help_output"
+
+test "
+`./$1 -b -n`" = "
+-v 0	-b 0	-s (null)	-n 1	-F 0
+arguments after options:"
+test "
+`./$1 -b 0777 -n`" = "
+-v 0	-b 511	-s (null)	-n 1	-F 0
+arguments after options:"
+test "
+`./$1 --bigvalue --flag`" = "
+-v 0	-b 0	-s (null)	-n 1	-F 0
+arguments after options:"
+test "
+`./$1 --bigvalue 0777 --flag`" = "
+-v 0	-b 511	-s (null)	-n 1	-F 0
+arguments after options:"
+
+# Don't segfault on a trailing option with optional argument and no argument
+# given
+./$1 -b >/dev/null
+./$1 --bigvalue >/dev/null
+./$1 --bigvalue= >/dev/null

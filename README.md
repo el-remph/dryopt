@@ -1,48 +1,64 @@
-DRYopt
-======
+# DRYopt #
 
 Or, **I Can't Believe It's Another Getopt**. Process options DRYly, without
 churning out lines of boilerplate getopt(3) code.
 
-
-Features
---------
+## Features ##
 
 - Handles long and short options
 - Minimal code to write for caller -- options are parsed in a single function
   call without loops as would be the case with getopt(3); functionality lost
   from this can be implemented through [argp]-style callbacks
 - Automatic `--help` generation
-- Type checking and resolution, overflow checking -- no extra code for the
-  caller to write for casting, nor string conversion (which is often masses
-  of unchecked atoi(3) anyway)
-- Like with [Perl's Getopt::Long], option argument types mean that arguments
-  can be clearly distinguished from option characters, and inserted into a
-  bundled string. For example, `-w77 -g75 -p#` can become `-w77g75p#`. Even
-  for optional arguments, given that `-a` takes an optional FLOATING argument,
-  `-a12.008e2b` sets `-a` to 1200.8, while `-ab` sets `-a` to 0 (both set
-  `-b`).
-- wchar_t options allowed (UTF-32 on sane systems, UCS-2 on W*ndows);
-  respects locale
-- Not too intrusive with the globals
-- No heap allocation
+- Cool [type system](#type-system)
+- wchar_t options allowed (UTF-32 on sane systems, equivalent on FreeBSD and
+  Solaris, UCS-2 on W*ndows); respects locale
+- No heap allocation, and not too intrusive with the globals
 - Single-{source,header,object}
 
-[Perl's Getopt::Long]: https://metacpan.org/dist/Getopt-Long
 [argp]: https://sourceware.org/glibc/manual/latest/html_node/Argp.html
 
+### Type System ###
 
-Requirements (minimal)
-----------------------
+- DRYopt features (very lightweight and basic) type checking and resolution,
+  including numeric overflow checking, so there is no extra code for the caller
+  to write for casting, nor string conversion (which is often masses of
+  unchecked atoi(3) anyway).
 
+- As with [Perl's Getopt::Long], option argument types mean that arguments
+  can be clearly distinguished from option characters, and inserted into a
+  bundled string. For example,
+
+      -w77 -g75 -p#
+
+  can become
+
+      -w77g75p#
+
+- Likewise, for numeric types, the presence of an optional argument is
+  determined by whether the argument fits the prescribed type, rather than
+  the getopt(3) method (which is still used for non-numeric types) where
+  `-o ARG` syntax is no longer available and options must be set as
+  `-oARG`. For instance, given option `-a` takes an optional FLOATING
+  argument and option `-b` takes no argument (all the following examples
+  set `-b`):
+  - `-a12.008e2b` sets `-a` to 1200.8
+  - `-ab` sets `-a` to 0
+  - `-a -2 -b` sets `-a` to -2.0
+  - `-a -b` sets `-a` to 0
+
+[Perl's Getopt::Long]: https://metacpan.org/dist/Getopt-Long
+
+
+## Requirements (minimal) ##
+
+- ISO C95
 - Some basic C99 features, widely implemented before C99 (eg. old GCC, even
   MSVC); see top of [dryopt.c](dryopt.c) for details
 - C11 for the optional but very handy `DRYOPT()` macro for the caller
 - No UNIVACs, no PDP-11s, no Harvard microcontrollers
 
-
-Missing features (may or may not be implemented later)
-------------------------------------------------------
+## Missing features (may or may not be implemented later) ##
 
 - GNU getopt(3)-style argv permution (probably WONTFIX)
 - Guaranteed UTF-32 -- could do that with a #define, a typedef for
@@ -63,13 +79,11 @@ Missing features (may or may not be implemented later)
 [popt]: https://github.com/rpm-software-management/popt
 
 
-Example
--------
+## Example ##
+
 See [tests/test-bin.c](tests/test-bin.c).
 
-
-Copyright
----------
+## Copyright ##
 
 Copyright (C) 2024 The Remph <lhr@disroot.org>; free software under the
 terms of the GNU Lesser General Public Licence as published by the Free
