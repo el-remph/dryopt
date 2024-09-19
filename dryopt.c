@@ -13,6 +13,7 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include "dryopt.h"
 
 #include <assert.h>
+#include <ctype.h>	/* isspace(3) */
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
@@ -212,6 +213,17 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 	}
 }
 
+static bool __attribute__((pure))
+str_n_isnegative(char const * str)
+/* since strtoul(3) and friends don't report underflow on unsigned numbers,
+   we must sadly retrace their steps in order to see if a negative number
+   was inappropriately passed. Basically just /^\s*-/ */
+{
+	while (isspace(*str))
+		str++;
+	return *str == '-';
+}
+
 static char *
 parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		union dryoptarg *restrict const parsed)
@@ -253,8 +265,12 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 				ERR("%s: %s", optstr, strerror(errno));
 				return optstr;
 			}
-			arg_found = *optstr && optstr != endptr;
+			arg_found = *optstr && optstr != endptr,
 			optstr = endptr;
+			if (arg_found && opt->type == UNSIGNED && str_n_isnegative(optstr)) {
+				ERR("%s: %s", optstr, strerror(ERANGE));
+				return optstr;
+			}
 			break;
 		}
 	case CALLBACK:
