@@ -15,6 +15,7 @@ struct dryopt {
 	char const *restrict longopt, *restrict helpstr;
 
 	enum dryarg_tag {
+		DRYOPT_INVALID = 0,	/* prevent negligent zero-initialisation */
 		STR, CHAR, SIGNED,
 		UNSIGNED,	/* applies to _Bool */
 		FLOATING,	/* note that this only works for the (typically)
@@ -31,13 +32,15 @@ struct dryopt {
 	unsigned sizeof_arg: 4;
 
 	void * argptr;	/* type pointed to depends on .type */
-	/* What is to be done here for CALLBACK? */
+	/* If .type == CALLBACK, dryopt ignores this union, so the caller
+	   can use it to pass arbitrary data to the callback */
 	union {
 		/* if no arg is given and .takes_arg != REQ_ARG, this is
 		   written to .argptr */
 		union dryoptarg {
+			long long unsigned u;	/* this must come first as
+						   it is easiest to cast to */
 			long long signed i;
-			long long unsigned u;
 			double f;
 			void * p;
 		} assign_val;
@@ -57,7 +60,7 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 /* BEWARE! <ARGPTR> may be evaluated multiple times!
    Also, this one depends on C11 _Generic. If you lack that, you'll have to
    fill out the struct yourself */
-#define DRYOPT(SHORT, LONG, HELP, ARGPTR, TAKES_ARG, VAL) {	\
+#define DRYOPT(SHORT, LONG, HELP, TAKES_ARG, ARGPTR, VAL) {	\
 	.shortopt = (SHORT), .longopt = (LONG), .helpstr = (HELP),	\
 	.type = _Generic((ARGPTR),			\
 			_Bool*:	UNSIGNED,		\
@@ -83,7 +86,7 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 	.argptr = (ARGPTR), .assign_val = {VAL} }
 
 
-extern size_t dryopt_parse (char *const[], struct dryopt[], size_t)
+extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_only, 2, 3), nonnull));
 
 /* Note: this returns! */

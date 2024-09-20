@@ -47,6 +47,9 @@ churning out lines of boilerplate getopt(3) code.
   - `-a -2 -b` sets `-a` to -2.0
   - `-a -b` sets `-a` to 0
 
+- Enums, for arguments that all set the same option to different values,
+  like `--colour={auto,always,never}`
+
 [Perl's Getopt::Long]: https://metacpan.org/dist/Getopt-Long
 
 
@@ -65,13 +68,7 @@ churning out lines of boilerplate getopt(3) code.
   wchar_t/char32_t, and some ifdefery for mbtowc/mbrtoc32, only works
   at C11 -- but there is no c32type.h! So GNU libunistring? Who's even
   using characters outside the BMP as flags?
-- Aliases -- probably a TODO
-- Some way to negate boolean short opts -- definitely a TODO
 - User-defined limits, not just the bounds of the type
-- Enums! For mutually exclusive options that all set the same variable to
-  different values, like gzip's `-[zdlt]`
-  - What about the same, for arguments instead of options? Like
-    `--colour={auto,always,never}`
 - Complex systems like sections and trees of options -- use [argp] or
   [popt]\(3) instead
 - getopt_long_only(3)-style single dash parsing

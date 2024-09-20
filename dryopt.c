@@ -5,7 +5,8 @@
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
 		restrict'd pointers, on the other hand, are not always
-	libc:	<stdbool.h>, <float.h>, isfinite(3), printf(3) "%tu"
+	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", some mixing of
+		code and declarations
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX)
 */
@@ -71,14 +72,13 @@ err_(const char *restrict const fmt, ...)
 #define ENUM_MAP_ENTRY(enum_val) [enum_val] = #enum_val
 /* Array size specified, so in the unlikely event that some borked compiler
    decides to make enum values non-linear, we at least get a warning */
-static char const *restrict enum_type2str[7] = {
+static char const *restrict enum_type2str[FLOATING + 1] = {
+	NULL, // DRYOPT_INVALID
 	ENUM_MAP_ENTRY(STR),
 	ENUM_MAP_ENTRY(CHAR),
 	ENUM_MAP_ENTRY(SIGNED),
 	ENUM_MAP_ENTRY(UNSIGNED),
-	ENUM_MAP_ENTRY(FLOATING),
-	ENUM_MAP_ENTRY(CALLBACK),
-	ENUM_MAP_ENTRY(ENUM_ARG)
+	ENUM_MAP_ENTRY(FLOATING)
 };
 
 extern void __attribute__((cold, leaf))
@@ -125,8 +125,8 @@ auto_help (
 
 static bool __attribute__((__const__))
 fits_in_bits(long long unsigned n, size_t const nbits, bool const issigned)
-/* similar to C23's stdc_bit_width(), but can deal with signed as well as
-   unsigned */
+/* similar to C23 `stdc_bit_width(n) <= nbits', but can deal with signed as
+   well as unsigned */
 {
 	union { long long unsigned u; long long i; } arg = {n};
 
@@ -302,8 +302,8 @@ static bool __attribute__((__const__))
 is_strictly_defined(enum dryarg_tag const type)
 {
 	switch (type) {
-	// what about CALLBACK? or CHAR, requiring the whole string to be one char?
-	case SIGNED: case UNSIGNED: case FLOATING:
+	// what about CHAR, requiring the whole string to be one char?
+	case SIGNED: case UNSIGNED: case FLOATING: case CALLBACK:
 		return true;
 	default:
 		return false;
@@ -312,8 +312,16 @@ is_strictly_defined(enum dryarg_tag const type)
 
 #define ARGNFOUND(optfmt, opt)	\
 		ERR("missing %s argument to " optfmt,	\
-			opts[opti].type >= CALLBACK ? "" : enum_type2str[opts[opti].type],	\
+			opts[opti].type >= sizeof enum_type2str / sizeof *enum_type2str	\
+				? "" : enum_type2str[opts[opti].type],	\
 			opt)
+
+static bool __attribute__((pure))
+opt_is_boolean(struct dryopt const *const opt)
+{
+	return opt->type == UNSIGNED && opt->takes_arg == NO_ARG
+		&& opt->assign_val.u == 1;
+}
 
 // Returns n of arguments consumed from argv
 static size_t
@@ -345,7 +353,7 @@ parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 			neg_long_opt++;
 
 		for (opti = 0; opti < optn; opti++) {
-			if (opts[opti].longopt && opts[opti].type == UNSIGNED
+			if (opts[opti].longopt && opt_is_boolean(opts + opti)
 				&& strcmp(neg_long_opt, opts[opti].longopt) == 0)
 			{
 				memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);

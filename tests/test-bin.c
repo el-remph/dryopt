@@ -21,12 +21,12 @@ char const *const enum_args[] = { "never", "auto", "always", NULL };
 // don't forget to ^ NULL-terminate! pillock
 
 static struct dryopt opts[] = {
-	DRYOPT(L'v', "value",	"set value", &value, REQ_ARG, 0),
-	DRYOPT(L'b', "bigvalue",	"set bigvalue", &bigvalue, OPT_ARG, 0),
-	DRYOPT(L'c', "callback",	"call callback", callback, OPT_ARG, 0),
-	DRYOPT(L's', "strarg",	"set strarg", &strarg, OPT_ARG, 0),
-	DRYOPT(L'n', "flag",	"boolean; takes no argument", &flag, NO_ARG, 1),
-	DRYOPT(L'F', "float",	"set fl (double)", &fl, REQ_ARG, 0),
+	DRYOPT(L'v', "value",	"set value", REQ_ARG, &value, 0),
+	DRYOPT(L'b', "bigvalue",	"set bigvalue", OPT_ARG, &bigvalue, 0),
+	DRYOPT(L'c', "callback",	"call callback", OPT_ARG, callback, 0),
+	DRYOPT(L's', "strarg",	"set strarg", OPT_ARG, &strarg, 0),
+	DRYOPT(L'n', "flag",	"boolean; takes no argument", NO_ARG, &flag, 1),
+	DRYOPT(L'F', "float",	"set fl (double)", REQ_ARG, &fl, 0),
 	// DRYOPT can't be used to init an ENUM_ARG
 	{ L'e', "enum", .type = ENUM_ARG, .sizeof_arg = sizeof e,
 		.argptr = &e, .enum_args = enum_args }
