@@ -7,6 +7,12 @@
 #include <stddef.h>	/* wchar_t, size_t */
 #include <stdio.h>	/* FILE* */
 
+/* finds log2 of any power of two LESS THAN OR EQUAL TO 8; compile-time
+   constant. To elaborate, v MUST be one of {1, 2, 4, 8}. Stolen and modified
+   from public-domain code, specifically the John Owens variant at
+   <https://graphics.stanford.edu/~seander/bithacks.html#IntegerLog> */
+#define LOG2_EXACT_4BIT(v)	((!!((v) & 0b1100)) << 1 | !!((v) & 0b1010))
+
 struct dryopt {
 	/* Each of these can be 0 to indicate it should not be (eg.
 	   .shortopt = L'\0' means no shortopt, .longopt = NULL means no
@@ -26,9 +32,9 @@ struct dryopt {
 	/* overwritten with REQ_ARG if .type is ENUM_ARGS */
 	enum { NO_ARG = 0, OPT_ARG, REQ_ARG } takes_arg: 2;
 
-	/* ignored if .type is STR, CHAR or CALLBACK. maximum sizeof
-	   .assign_val (8, 010) */
-	unsigned sizeof_arg: 4;
+	/* ignored if .type is STR, CHAR or CALLBACK. values assigned here
+	   MUST be encoded with LOG2_EXACT_4BIT(v), to save on 2 whole bits. */
+	unsigned sizeof_arg_: 2;
 
 	void * argptr;	/* type pointed to depends on .type */
 	/* What is to be done here for CALLBACK? */
@@ -76,14 +82,14 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 			double*:	FLOATING,	\
 			dryopt_callback:	CALLBACK),	\
 	.takes_arg = TAKES_ARG,				\
-	.sizeof_arg = _Generic((ARGPTR),		\
+	.sizeof_arg_ = _Generic((ARGPTR),		\
 			char**: 0,			\
 			dryopt_callback: 0,		\
-			default: sizeof *(ARGPTR)),	\
+			default: LOG2_EXACT_4BIT(sizeof *(ARGPTR))),	\
 	.argptr = (ARGPTR), .assign_val = {VAL} }
 
 
-extern size_t dryopt_parse (char *const[], struct dryopt[], size_t)
+extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_only, 2, 3), nonnull));
 
 /* Note: this returns! */

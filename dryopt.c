@@ -5,7 +5,7 @@
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
 		restrict'd pointers, on the other hand, are not always
-	libc:	<stdbool.h>, <float.h>, isfinite(3), printf(3) "%tu"
+	libc:	<stdbool.h>, FLT_MAX, isfinite(3), printf(3) "%tu"
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX)
 */
@@ -24,6 +24,10 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <stdio.h>
 #include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
+
+#if __STDC_VERSION__ < 201100l && !defined static_assert
+#  define static_assert(expr, str) assert(expr)
+#endif
 
 char const *restrict prognam = NULL;
 struct dryopt_config_s dryopt_config = {0};
@@ -163,10 +167,13 @@ copy_word(void *restrict dest, size_t const destz, void const *restrict src, siz
 static void
 write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 {
-	assert(opt->sizeof_arg <= sizeof arg);
+	size_t const sizeof_arg = 1 << opt->sizeof_arg_;
+	static_assert(sizeof arg == 1 << LOG2_EXACT_4BIT(sizeof arg),
+			"2-bit encoding of word size is broken");
+	assert(sizeof_arg <= sizeof arg);
 
 	switch (opt->type) {
-		// Sometimes .sizeof_arg is ignored. You were warned!
+		// Sometimes .sizeof_arg_ is ignored. You were warned!
 	case STR:
 		*(void**)opt->argptr = arg.p;
 		break;
@@ -180,9 +187,9 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 	case SIGNED: case UNSIGNED: case ENUM_ARG:
 		/* We don't use sizeof arg here because arg.f could be 12
 		   or 16 bytes, while arg.i and arg.u is typically 8 */
-		if (sizeof arg.i != opt->sizeof_arg) {
-			assert(sizeof arg.i > opt->sizeof_arg);
-			if (!fits_in_bits(arg.u, opt->sizeof_arg * CHAR_BIT, opt->type == SIGNED)) {
+		if (sizeof arg.i != sizeof_arg) {
+			assert(sizeof arg.i > sizeof_arg);
+			if (!fits_in_bits(arg.u, sizeof_arg * CHAR_BIT, opt->type == SIGNED)) {
 				/* signed output should always make sense here,
 				   since overflow of the long long sign bit is
 				   tested by strtoll(3) earlier */
@@ -190,15 +197,15 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 				return;
 			}
 		}
-		copy_word(opt->argptr, opt->sizeof_arg, &arg, sizeof arg.u);
+		copy_word(opt->argptr, sizeof_arg, &arg, sizeof arg.u);
 		break;
 
 	case FLOATING:
 		// floating point format is not as simple as integral :(
-		if (sizeof arg.f == opt->sizeof_arg)
+		if (sizeof arg.f == sizeof_arg)
 			*(double*)opt->argptr = arg.f;
 		else {
-			assert(opt->sizeof_arg == sizeof(float));
+			assert(sizeof_arg == sizeof(float));
 			// TODO: what about subnormal values?
 			if (isfinite(arg.f) && (arg.f > FLT_MAX || arg.f < -FLT_MAX)) {
 				ERR("%g: %s", arg.f, strerror(ERANGE));
@@ -348,7 +355,7 @@ parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 			if (opts[opti].longopt && opts[opti].type == UNSIGNED
 				&& strcmp(neg_long_opt, opts[opti].longopt) == 0)
 			{
-				memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+				memset(opts[opti].argptr, 0, 1 << opts[opti].sizeof_arg_);
 				return argi;
 			}
 		}
@@ -407,7 +414,7 @@ thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
 					og_long_arg - long_arg, longopt, og_long_arg);
 					// TODO: shouldn't this return?
 		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+			memset(opts[opti].argptr, 0, 1 << opts[opti].sizeof_arg_);
 		else {
 arg_not_found:		ARGNFOUND("--%s", longopt);
 			return argi;
@@ -506,7 +513,7 @@ thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 				return argi;
 			}
 		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+			memset(opts[opti].argptr, 0, 1 << opts[opti].sizeof_arg_);
 		else {
 			ARGNFOUND("-%lc", wc);
 			return argi;

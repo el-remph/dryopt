@@ -28,7 +28,7 @@ static struct dryopt opts[] = {
 	DRYOPT(L'n', "flag",	"boolean; takes no argument", &flag, NO_ARG, 1),
 	DRYOPT(L'F', "float",	"set fl (double)", &fl, REQ_ARG, 0),
 	// DRYOPT can't be used to init an ENUM_ARG
-	{ L'e', "enum", .type = ENUM_ARG, .sizeof_arg = sizeof e,
+	{ L'e', "enum", .type = ENUM_ARG, .sizeof_arg_ = LOG2_EXACT_4BIT(sizeof e),
 		.argptr = &e, .enum_args = enum_args }
 };
 
