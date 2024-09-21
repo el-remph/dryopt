@@ -9,7 +9,7 @@
 
 size_t callback(struct dryopt const * opt __attribute__((unused)), char const * arg) {
 	printf("callback saw: %s\n", arg);
-	return strlen(arg);
+	return arg ? strlen(arg) : 0;
 }
 
 // initialised to defaults

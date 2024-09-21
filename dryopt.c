@@ -287,6 +287,8 @@ copy_word(void *restrict dest, size_t const destz, void const *restrict src, siz
 
 static void
 write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
+/* If calling this without first calling parse_optarg() (such as if
+   opt->takes_arg == NO_ARG), *BEWARE* opt->type == CALLBACK */
 {
 	assert(opt->sizeof_arg <= sizeof arg);
 
@@ -492,6 +494,8 @@ found:	if (opts[opti].type == ENUM_ARG)
 		if (long_arg)
 			// TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
+		else if (opts[opti].type == CALLBACK)
+			((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
 		else
 			write_optarg(opts + opti, opts[opti].assign_val);
 	else {
@@ -505,7 +509,7 @@ thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
 		else {
 			if (opts[opti].takes_arg == OPT_ARG) {
 				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].type) && argv[argi]) {
+				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
 					long_arg = parse_optarg(opts + opti, argv[argi], &parsed);
 					if (long_arg && !*long_arg)
 						og_long_arg = argv[argi++];
@@ -577,7 +581,10 @@ found:		union dryoptarg parsed;
 			opts[opti].takes_arg = REQ_ARG;
 
 		if (opts[opti].takes_arg == NO_ARG) {
-			write_optarg(opts + opti, opts[opti].assign_val);
+			if (opts[opti].type == CALLBACK)
+				((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+			else
+				write_optarg(opts + opti, opts[opti].assign_val);
 			continue;
 		}
 
@@ -591,7 +598,7 @@ found:		union dryoptarg parsed;
 		if (!*optstr)
 			if (opts[opti].takes_arg == OPT_ARG) {
 				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].type) && argv[argi]) {
+				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
 					new_optstr = parse_optarg(opts + opti, argv[argi], &parsed);
 					/* if the whole of the next arg was
 					   successfully consumed, make the peekahead

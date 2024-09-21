@@ -101,3 +101,12 @@ done
 for i in -F --float --float=; do
 	fail_test "$exe: missing FLOATING argument to ${i%=}" $i
 done
+
+for i in -c --callback; do
+	do_test 'callback saw: yeeble
+-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:	deeble' $i yeeble deeble
+	do_test 'callback saw: (null)
+-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:' $i
+done
