@@ -478,7 +478,7 @@ found:		union dryoptarg parsed;
 		   flags twice; a compiler could even optimise some cases
 		   out. Moreover, this version is less unreadable
 		        ^ That was premature. This is not pretty. TODO: function */
-		if (!*optstr) {
+		if (!*optstr)
 			if (opts[opti].takes_arg == OPT_ARG) {
 				// peek at next arg (argi was already incremented)
 				if (is_strictly_defined(opts[opti].type) && argv[argi]) {
@@ -494,11 +494,11 @@ found:		union dryoptarg parsed;
 							new_optstr = NULL; // it never happened
 					}
 				}
-			} else {
-				optstr = argv[argi++]; // leave new_optstr as NULL
+			} else if ((optstr = argv[argi++]))
 				goto thru;
-			}
-		} else {
+			else
+				goto arg_not_found;
+		else {
 thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 			/* argi wasn't advanced, new_optstr is just part of
 			   optstr, so advance optstr */
@@ -516,7 +516,7 @@ thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 		} else if (opts[opti].takes_arg == OPT_ARG)
 			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
 		else {
-			ARGNFOUND("-%lc", wc);
+arg_not_found:		ARGNFOUND("-%lc", wc);
 			return argi;
 		}
 	}

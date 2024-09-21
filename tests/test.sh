@@ -20,6 +20,22 @@ do_test() {
 	return 0
 }
 
+fail_test() {
+	expectation=$1
+	shift
+	echo >&2 "Testing: $*"
+	if reality=`$exe "$@" 2>&1 >/dev/null`; then
+		echo >&2 "$exe $*: false success"
+		return 1
+	fi
+	if test "$expectation" != "$reality"; then
+		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+			"$exe $*" "$expectation" "$reality"
+		return 1
+	fi
+	return 0
+}
+
 do_test '-v 32767	-b 0	-s string	-n 1	-F 0
 arguments after options:	foo	bar'	\
 	-nbv32767sstring foo bar
@@ -30,22 +46,15 @@ arguments after options:	-bar	foo	mung'	\
 
 export LANG=C
 if type errno >/dev/null 2>&1; then
-	erange_str=`errno ERANGE | sed 's/^ERANGE 34 //'`
+	erange_str=`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`
+#	erange_str=${erange_str#'ERANGE 34 '}
 else
 	erange_str='Numerical result out of range'
 fi
 
 # overflow tests
 for i in 32768 -32769; do
-	# The negation ensures `set -e' interprets this right -- the command
-	# must fail, and shell errexit triggers if it doesn't; stderr is captured
-	stderr_contents=`! $exe --value:$i 2>&1 >/dev/null`
-	expected="./$1: $i: $erange_str"
-	if test "$stderr_contents" != "$expected"; then
-		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
-			"$exe --value:$i" "$expected" "$stderr_contents"
-		exit 1
-	fi
+	fail_test "$exe: $i: $erange_str" --value:$i
 done
 
 help_output="\
@@ -86,4 +95,9 @@ for i in -b --bigvalue --bigvalue=; do
 	do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
 arguments after options:'	\
 		$i
+done
+
+# Don't segfault if the argument is mandatory either; try to fail with grace
+for i in -F --float --float=; do
+	fail_test "$exe: missing FLOATING argument to ${i%=}" $i
 done
