@@ -464,7 +464,7 @@ found:		union parsed_optarg parsed;
 		   flags twice; a compiler could even optimise some cases
 		   out. Moreover, this version is less unreadable
 		        ^ That was premature. This is not pretty. TODO: function */
-		if (opts[opti].arg != BOOLEAN && !*optstr) {
+		if (opts[opti].arg != BOOLEAN && !*optstr)
 			if (opts[opti].optional) {
 				// peek at next arg (argi was already incremented)
 				if (is_strictly_defined(opts[opti].arg) && argv[argi]) {
@@ -480,11 +480,11 @@ found:		union parsed_optarg parsed;
 							new_optstr = NULL; // it never happened
 					}
 				}
-			} else {
-				optstr = argv[argi++]; // leave new_optstr as NULL
+			} else if ((optstr = argv[argi++]))
 				goto thru;
-			}
-		} else {
+			else
+				goto arg_not_found;
+		else {
 thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 			/* argi wasn't advanced, new_optstr is just part of
 			   optstr, so advance optstr */
@@ -502,7 +502,7 @@ thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 		} else if (opts[opti].optional)
 			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
 		else {
-			ERR("missing %s arg to -%lc",
+arg_not_found:		ERR("missing %s arg to -%lc",
 				opts[opti].arg == CALLBACK ? "" : enumarg2str[opts[opti].arg],
 				wc);
 			return argi;

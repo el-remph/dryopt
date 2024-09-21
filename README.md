@@ -3,6 +3,9 @@
 Or, **I Can't Believe It's Another Getopt**. Process options DRYly, without
 churning out lines of boilerplate getopt(3) code.
 
+Note that the 'overhaul' branch is more active than master, and will probably
+continue to be
+
 ## Features ##
 
 - Handles long and short options
