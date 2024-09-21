@@ -4,9 +4,9 @@
 /*
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
-		restrict'd pointers, on the other hand, are not always
-	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", some mixing of
-		code and declarations
+		restrict'd pointers, on the other hand, are not always. Some
+		mixing of code and declarations
+	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX)
 */
@@ -25,9 +25,10 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <stdio.h>
 #include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
+#include <wchar.h>	/* wcrtomb(3) */
 
 char const *restrict prognam = NULL;
-struct dryopt_config_s dryopt_config = {0};
+struct dryopt_config_s dryopt_config = { .wrap = 80 };
 
 #if 0
 static int
@@ -70,20 +71,143 @@ err_(const char *restrict const fmt, ...)
 #endif
 
 #define ENUM_MAP_ENTRY(enum_val) [enum_val] = #enum_val
-/* Array size specified, so in the unlikely event that some borked compiler
-   decides to make enum values non-linear, we at least get a warning */
-static char const *restrict enum_type2str[FLOATING + 1] = {
-	NULL, // DRYOPT_INVALID
-	ENUM_MAP_ENTRY(STR),
-	ENUM_MAP_ENTRY(CHAR),
-	ENUM_MAP_ENTRY(SIGNED),
-	ENUM_MAP_ENTRY(UNSIGNED),
-	ENUM_MAP_ENTRY(FLOATING)
-};
+static char const *__attribute__((__const__, returns_nonnull))
+enum_type2str(enum dryarg_tag const tag)
+{
+	/* Array size specified, so in the unlikely event that some borked compiler
+	   decides to make enum values non-linear, we at least get a warning */
+	static char const *restrict table[FLOATING + 1] = {
+		NULL, // DRYOPT_INVALID
+		ENUM_MAP_ENTRY(STR),
+		ENUM_MAP_ENTRY(CHAR),
+		ENUM_MAP_ENTRY(SIGNED),
+		ENUM_MAP_ENTRY(UNSIGNED),
+		ENUM_MAP_ENTRY(FLOATING)
+	};
+
+	return tag >= sizeof table / sizeof *table ? "" : table[tag];
+}
+
+static bool __attribute__((__const__))
+is_strictly_defined(enum dryarg_tag const type)
+{
+	switch (type) {
+	// what about CHAR, requiring the whole string to be one char?
+	case SIGNED: case UNSIGNED: case FLOATING: case CALLBACK:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int __attribute__((format(__printf__, 2, 3), nonnull(2)))
+print_row_printf_helper(FILE * out, char const * fmt, ...)
+{
+	int ret;
+	va_list va;
+	va_start(va, fmt);
+	ret = out ? vfprintf(out, fmt, va) : vsnprintf(NULL, 0, fmt, va);
+	va_end(va);
+	return ret;
+}
+
+static int __attribute__((nonnull(1)))
+print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const out)
+{
+	wchar_t shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
+//	int const unseen_bytes = wcstombs(NULL, shortopt_buf, 0) - wcslen(shortopt_buf);
+	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, NULL) - 1 : 0;
+	char const argsep[2] = {
+		opt->takes_arg && opt->longopt
+		? '='
+		: opt->takes_arg == REQ_ARG || (opt->takes_arg == OPT_ARG && is_strictly_defined(opt->type))
+			? ' '
+			: '\0',
+		'\0'
+	};
+	int ret = print_row_printf_helper (out,
+		"  %ls%s%s%s%s%s",
+		shortopt_buf,
+		opt->shortopt && opt->longopt ? ", " : "",
+		opt->longopt ? "--" : "",
+		opt->longopt ? opt->longopt : "",
+		argsep,
+		opt->takes_arg == OPT_ARG ? "[" : ""
+	);
+
+	if (opt->type == ENUM_ARG) {
+		size_t i = 0;
+		for (; opt->enum_args[i]; i++)
+			ret += print_row_printf_helper(out, "%s%s", i ? "," : "", opt->enum_args[i]);
+	} else if (opt->takes_arg)
+		ret += print_row_printf_helper(out, "%s%s",
+			opt->type == CALLBACK ? "ARG" : enum_type2str(opt->type),
+			opt->takes_arg == OPT_ARG ? "]" : "");
+	// else no arg
+
+	if (unseen_bytes > 0)
+		ret -= unseen_bytes;
+
+	return ret;
+}
+
+static int
+break_space(char const *const s, unsigned offset)
+/* Looks for a space at which to break the string. Starts at offset
+   (ie. length until the margin line) and looks backwards; if unsuccessful,
+   looks forwards instead for the rest of the string. Returns the length of
+   string to print, which may be the whole thing. `unsigned' is to avoid
+   unnecessary sign extension for indices, but the type returned is within
+   [0, INT_MAX], so it can be passed to printf(3) */
+{
+	unsigned const og_offset = offset;
+
+	{
+		char const *const t = memchr(s, 0, offset);
+		if (t)
+			return t - s; // bounded by offset, so no risk of overflow
+	}
+
+	do
+		if (isspace(s[offset]))
+			return offset;
+	while (--offset);
+
+	offset = og_offset;
+	while (offset++ < INT_MAX && s[offset] && !isspace(offset));
+	return offset;
+}
+
+static void __attribute__((nonnull))
+wrap_help_text(FILE *restrict const out, char const *restrict help_text,
+		unsigned const lmargin, unsigned const rmargin, unsigned const already_printed)
+{
+	int break_offset;
+
+	/* everything before the loop is just an extended first iteration
+	   of the loop, accounting for factors that become nonexistent in
+	   subsequent iterations (like already_printed) */
+
+	fprintf(out, "%*s", lmargin > already_printed ? lmargin - already_printed : 0, " ");
+	if (rmargin < lmargin) {
+		fprintf(out, "%s\n", help_text);
+		return;
+	}
+
+	break_offset = break_space(help_text, rmargin - lmargin);
+	fprintf(out, "%.*s\n", break_offset, help_text);
+
+	while (*(help_text += break_offset)) {
+		help_text++;	/* if it gets past the above test,
+				   !!isspace(*help_text), so skip it */
+		break_offset = break_space(help_text, rmargin - lmargin);
+		fprintf(out, "%*s%.*s\n", lmargin, " ", break_offset, help_text);
+	}
+}
 
 extern void __attribute__((cold, leaf))
 auto_help (
-	struct dryopt const opts[],
+	struct dryopt opts[],
 	size_t const optn,
 	FILE *restrict const outfile,
 	char const *restrict const program_name,
@@ -91,6 +215,17 @@ auto_help (
 	char const *restrict const help_extra
 ) {
 	size_t i;
+	int len = 0;
+
+	// first pass: find longest entry string (`  -o, --option=[ARG]')
+	for (i = 0; i < optn; i++) {
+		int l;
+		/* also cheekily fix ENUM_ARG entries */
+		if (opts[i].type == ENUM_ARG)
+			opts[i].takes_arg = REQ_ARG;
+		if (len < (l = print_help_entry(opts + i, NULL)))
+			len = l;
+	}
 
 	fprintf(outfile, "Usage: %s [OPTS] %s\n",
 		program_name, help_args ? help_args : "[ARGS]");
@@ -98,28 +233,18 @@ auto_help (
 	if (help_extra)
 		fprintf(outfile, "%s\n", help_extra);
 
+	// second pass: actually print
 	for (i = 0; i < optn; i++) {
-		fputs("  ", outfile);
-		if (opts[i].shortopt)
-			fprintf(outfile, "-%lc", opts[i].shortopt);
-		if (opts[i].longopt)
-			fprintf(outfile, "%s--%s", opts[i].shortopt ? ", " : "", opts[i].longopt);
-
-		if (opts[i].takes_arg)
-			fprintf(outfile, "=%s%s%s",
-				opts[i].takes_arg == OPT_ARG ? "[" : "",
-				opts[i].type >= CALLBACK ? "ARG" : enum_type2str[opts[i].type],
-				opts[i].takes_arg == OPT_ARG ? "]" : "");
-		else if (opts[i].type == ENUM_ARG) {
-			size_t j;
-			fputc('=', outfile);
-			for (j = 0; opts[i].enum_args[j]; j++)
-				fprintf(outfile, "%s%s", j ? "," : "", opts[i].enum_args[j]);
-		} // else no arg
+		int const printed = print_help_entry(opts + i, outfile);
+		if (printed < 0) {
+			perror(program_name);
+			continue;
+		}
 
 		if (opts[i].helpstr)
-			fprintf(outfile, "\t%s", opts[i].helpstr);
-		fputc('\n', outfile);
+			wrap_help_text(outfile, opts[i].helpstr, len + 3, dryopt_config.wrap, printed);
+		else
+			fputc('\n', outfile);
 	}
 }
 
@@ -298,23 +423,8 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 	return arg_found ? optstr : NULL;
 }
 
-static bool __attribute__((__const__))
-is_strictly_defined(enum dryarg_tag const type)
-{
-	switch (type) {
-	// what about CHAR, requiring the whole string to be one char?
-	case SIGNED: case UNSIGNED: case FLOATING: case CALLBACK:
-		return true;
-	default:
-		return false;
-	}
-}
-
 #define ARGNFOUND(optfmt, opt)	\
-		ERR("missing %s argument to " optfmt,	\
-			opts[opti].type >= sizeof enum_type2str / sizeof *enum_type2str	\
-				? "" : enum_type2str[opts[opti].type],	\
-			opt)
+		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt)
 
 static bool __attribute__((pure))
 opt_is_boolean(struct dryopt const *const opt)

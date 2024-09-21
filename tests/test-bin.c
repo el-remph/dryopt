@@ -1,3 +1,5 @@
+// TODO: non-ASCII option characters, wrapped help text lines
+
 #include "../dryopt.h"
 
 #include <stdbool.h>
@@ -28,8 +30,8 @@ static struct dryopt opts[] = {
 	DRYOPT(L'n', "flag",	"boolean; takes no argument", NO_ARG, &flag, 1),
 	DRYOPT(L'F', "float",	"set fl (double)", REQ_ARG, &fl, 0),
 	// DRYOPT can't be used to init an ENUM_ARG
-	{ L'e', "enum", .type = ENUM_ARG, .sizeof_arg = sizeof e,
-		.argptr = &e, .enum_args = enum_args }
+	{ L'e', "enum", "pick one of a predetermined set of arguments",
+		ENUM_ARG, 0, sizeof e, &e, .enum_args = enum_args }
 };
 
 int main(int argc __attribute__((unused)), char *const argv[]) {

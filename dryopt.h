@@ -90,7 +90,7 @@ extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_only, 2, 3), nonnull));
 
 /* Note: this returns! */
-extern void auto_help(	struct dryopt const opts[], size_t optn,
+extern void auto_help(	struct dryopt opts[], size_t optn,
 			FILE *restrict outfile, char const *restrict program_name,
 			char const *restrict help_args, char const *restrict help_extra)
 	__attribute__((cold, leaf));
@@ -104,6 +104,15 @@ extern struct dryopt_config_s {
 	/* this one is an output field: it starts at 0, and is set to 1 on
 	   error. This is redundant unless autodie != die */
 	unsigned mistakes_were_made: 1;
+
+	/* number of columns to wrap auto_help() output to. Default is 80;
+	   set to 0 to disable wrapping. Ten bits fills out to a 16-bit
+	   word, and allows wrapping up to 1023 (0x3FF) columns, which is
+	   plenty: I get 255 on a 2560x1440 screen with 12.5pt font, but
+	   bigger screens and smaller fonts are available. But does anyone
+	   like to read lines that long? If anything 10 bits is more than
+	   enough */
+	unsigned wrap: 10;
 } dryopt_config;
 
 /* WARNING! <OPTS> may be evaluated twice! */

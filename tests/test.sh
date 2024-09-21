@@ -59,13 +59,13 @@ done
 
 help_output="\
 Usage: ./tests/test-bin [OPTS] [ARGS]
-  -v, --value=SIGNED	set value
-  -b, --bigvalue=[UNSIGNED]	set bigvalue
-  -c, --callback=[ARG]	call callback
-  -s, --strarg=[STR]	set strarg
-  -n, --flag	boolean; takes no argument
-  -F, --float=FLOATING	set fl (double)
-  -e, --enum=never,auto,always"
+  -v, --value=SIGNED             set value
+  -b, --bigvalue=[UNSIGNED]      set bigvalue
+  -c, --callback=[ARG]           call callback
+  -s, --strarg=[STR]             set strarg
+  -n, --flag                     boolean; takes no argument
+  -F, --float=FLOATING           set fl (double)
+  -e, --enum=never,auto,always   pick one of a predetermined set of arguments"
 do_test "$help_output" -h
 do_test "$help_output" '-?'
 do_test "$help_output" --help
