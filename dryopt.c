@@ -8,7 +8,8 @@ C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
 		mixing of code and declarations
 	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
-	definitely a WONTFIX)
+	definitely a WONTFIX), anonymous union (widely available and
+	probably a WONTFIX)
 */
 
 #include "dryopt.h"
@@ -285,8 +286,16 @@ copy_word(void *restrict dest, size_t const destz, void const *restrict src, siz
 	memcpy(dest, bigendian ? src + srcz - destz : src, destz);
 }
 
+static union dryoptarg
+get_target(struct dryopt const *const opt)
+{
+	union dryoptarg target = {0};
+	copy_word(&target, sizeof target, opt->argptr, opt->sizeof_arg);
+	return target;
+}
+
 static void
-write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
+write_optarg(struct dryopt const *restrict const opt, union dryoptarg arg)
 /* If calling this without first calling parse_optarg() (such as if
    opt->takes_arg == NO_ARG), *BEWARE* opt->type == CALLBACK */
 {
@@ -317,6 +326,18 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 				return;
 			}
 		}
+
+		// Should this come before fits_in_bits()?
+		if (opt->set_arg) {
+			union dryoptarg const target = get_target(opt);
+			switch (opt->set_arg) {
+			case DRYARG_AND:	arg.u &= target.u; break;
+			case DRYARG_OR:		arg.u |= target.u; break;
+			case DRYARG_XOR:	arg.u ^= target.u; break;
+			default:		abort();
+			}
+		}
+
 		copy_word(opt->argptr, opt->sizeof_arg, &arg, sizeof arg.u);
 		break;
 
@@ -425,15 +446,38 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 	return arg_found ? optstr : NULL;
 }
 
+static bool
+negated_boolean_longopt(char const neg_long_opt[], struct dryopt const *const opt)
+{
+	if (!(opt->longopt
+	   && opt->type == UNSIGNED
+	   && !opt->takes_arg
+	   && strcmp(neg_long_opt, opt->longopt) == 0))
+		return false;
+
+	// Regular boolean
+	if (!opt->set_arg && opt->assign_val.u == 1) {
+		memset(opt->argptr, 0, opt->sizeof_arg);
+		return true;
+	}
+
+	// Boolean bit
+	if (opt->set_arg == DRYARG_OR) {
+		struct dryopt tmp = *opt;
+		tmp.set_arg = DRYARG_AND,
+		/* negate only the bits that will be set (XOR -1 is
+		   negation), to elude, er, my own overflow testing in
+		   write_optarg(). Drat */
+		tmp.assign_val.u ^= -1ull >> ((sizeof tmp.assign_val.u - tmp.sizeof_arg) * CHAR_BIT);
+		write_optarg(&tmp, tmp.assign_val);
+		return true;
+	}
+
+	return false;
+}
+
 #define ARGNFOUND(optfmt, opt)	\
 		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt)
-
-static bool __attribute__((pure))
-opt_is_boolean(struct dryopt const *const opt)
-{
-	return opt->type == UNSIGNED && opt->takes_arg == NO_ARG
-		&& opt->assign_val.u == 1;
-}
 
 // Returns n of arguments consumed from argv
 static size_t
@@ -457,26 +501,20 @@ parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 			long_arg = equals + 1;
 	}
 
+	for (opti = 0; opti < optn; opti++)
+		if (opts[opti].longopt && strcmp(longopt, opts[opti].longopt) == 0)
+			goto found;
+
 	if (!long_arg && strncmp(longopt, "no", 2) == 0) {
-		/* Could be a negated boolean long option: prioritise
-		   checking for that first */
+		/* Could be a negated boolean long option */
 		char * neg_long_opt = longopt + 2;
 		if (*neg_long_opt == '-')
 			neg_long_opt++;
 
-		for (opti = 0; opti < optn; opti++) {
-			if (opts[opti].longopt && opt_is_boolean(opts + opti)
-				&& strcmp(neg_long_opt, opts[opti].longopt) == 0)
-			{
-				memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+		for (opti = 0; opti < optn; opti++)
+			if (negated_boolean_longopt(neg_long_opt, opts + opti))
 				return argi;
-			}
-		}
 	}
-
-	for (opti = 0; opti < optn; opti++)
-		if (opts[opti].longopt && strcmp(longopt, opts[opti].longopt) == 0)
-			goto found;
 
 	// fallen through from above loop: not found
 	if (strcmp(longopt, "help") == 0) {

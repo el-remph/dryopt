@@ -1,12 +1,11 @@
 #!/bin/sh
-set -eu
-
+set -efu +m
 exe=./$1
 
 do_test() {
 	expectation=$1
 	shift
-	echo >&2 "Testing: $*"
+	echo >&2 "+> $exe $*"
 	if reality=`$exe "$@"`; then :; else # preserve $? without triggering errexit
 		code=$?
 		echo >&2 "$exe $*: exit $code"
@@ -23,7 +22,7 @@ do_test() {
 fail_test() {
 	expectation=$1
 	shift
-	echo >&2 "Testing: $*"
+	echo >&2 "+> $exe $*"
 	if reality=`$exe "$@" 2>&1 >/dev/null`; then
 		echo >&2 "$exe $*: false success"
 		return 1
