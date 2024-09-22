@@ -13,19 +13,20 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 
 #include "dryopt.h"
 
-#include <assert.h>
 #include <ctype.h>	/* isspace(3) */
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
 #include <locale.h>
 #include <math.h>	/* isfinite(3) */
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
+#include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
 #include <wchar.h>	/* wcrtomb(3) */
+
 
 char const *restrict prognam = NULL;
 struct dryopt_config_s dryopt_config = { .wrap = 80 };
@@ -248,6 +249,29 @@ auto_help (
 	}
 }
 
+
+// Used instead of abort(3) or assert(3) by functions below here
+static jmp_buf run_away;
+/* based on __glibc_(un)?likely() (copyright the FSF and GNU toolchain
+   authors, under SPDX:LGPL-2.1-or-later). These are really just for
+   exception handling. I've modified the syntax to be used as:
+	if likely(foo)
+		...
+	else
+		panic();
+   to reflect that these don't just feed into the if condition in the usual
+   way, and instead affect the flow control itself. */
+#if __GNUC__ >= 3
+#  define   likely(cond) (__builtin_expect((cond), 1))
+#  define unlikely(cond) (__builtin_expect((cond), 0))
+#else
+#  define   likely(cond) (cond)
+#  define unlikely(cond) (cond)
+#endif
+/* This macro is a replacement for assert(3), except it's always compiled
+   in (even ifdef NDEBUG) */
+#define enforce(cond, err_num) do if unlikely(!(cond)) longjmp(run_away, err_num); while (0)
+
 static bool __attribute__((__const__))
 fits_in_bits(long long unsigned n, size_t const nbits, bool const issigned)
 /* similar to C23 `stdc_bit_width(n) <= nbits', but can deal with signed as
@@ -275,7 +299,7 @@ init_bigendian(void)
 	switch (feff.s) {
 	case 0xfeff:	return true;
 	case 0xfffe:	return false;
-	default:	abort();
+	default:	longjmp(run_away, -1);
 	}
 }
 
@@ -290,7 +314,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 /* If calling this without first calling parse_optarg() (such as if
    opt->takes_arg == NO_ARG), *BEWARE* opt->type == CALLBACK */
 {
-	assert(opt->sizeof_arg <= sizeof arg);
+	enforce(opt->sizeof_arg <= sizeof arg, EINVAL);
 
 	switch (opt->type) {
 		// Sometimes .sizeof_arg is ignored. You were warned!
@@ -300,7 +324,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 	case CHAR:
 		/* again, this is unsigned to avoid sign extension. Why don't
 		   I just add a field to the union? */
-		assert(arg.u <= UCHAR_MAX);
+		enforce(arg.u <= UCHAR_MAX, EINVAL);
 		*(unsigned char*)opt->argptr = (unsigned char)arg.u;
 		break;
 
@@ -308,7 +332,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 		/* We don't use sizeof arg here because arg.f could be 12
 		   or 16 bytes, while arg.i and arg.u is typically 8 */
 		if (sizeof arg.i != opt->sizeof_arg) {
-			assert(sizeof arg.i > opt->sizeof_arg);
+			enforce(sizeof arg.i > opt->sizeof_arg, EINVAL);
 			if (!fits_in_bits(arg.u, opt->sizeof_arg * CHAR_BIT, opt->type == SIGNED)) {
 				/* signed output should always make sense here,
 				   since overflow of the long long sign bit is
@@ -325,7 +349,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 		if (sizeof arg.f == opt->sizeof_arg)
 			*(double*)opt->argptr = arg.f;
 		else {
-			assert(opt->sizeof_arg == sizeof(float));
+			enforce(opt->sizeof_arg == sizeof(float), EINVAL);
 			// TODO: what about subnormal values?
 			if (isfinite(arg.f) && (arg.f > FLT_MAX || arg.f < -FLT_MAX)) {
 				ERR("%g: %s", arg.f, strerror(ERANGE));
@@ -336,7 +360,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
 		break;
 
 	case CALLBACK:	return; // should already have been handled
-	default:	abort();
+	default:	longjmp(run_away, EINVAL);
 	}
 }
 
@@ -386,7 +410,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 				parsed->f = strtod(optstr, &endptr);
 				break;
 			default:
-				abort();
+				longjmp(run_away, -1);
 			}
 			if (errno) {
 				ERR("%s: %s", optstr, strerror(errno));
@@ -419,7 +443,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 			break;
 		}
 	default:
-		abort();
+		longjmp(run_away, EINVAL);
 	}
 
 	return arg_found ? optstr : NULL;
@@ -642,8 +666,16 @@ arg_not_found:		ARGNFOUND("-%lc", wc);
 extern size_t
 dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 {
-	size_t argi = 1;
+	size_t argi = 1; /* irrelevant on longjmp(3), so np if clobbered */
 	prognam = argv[0];
+	{
+		int const e = setjmp(run_away);
+		if unlikely(e) {
+			if (e > 0)
+				errno = e;
+			return (size_t)(-1 - (e > 0));
+		}
+	}
 	bigendian = init_bigendian();
 
 #if 0
