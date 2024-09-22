@@ -2,8 +2,9 @@
 
 #include "../dryopt.h"
 
+#include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,7 +14,7 @@ size_t callback(struct dryopt const * opt __attribute__((unused)), char const * 
 }
 
 // initialised to defaults
-short value = 0;
+int16_t value = 0;
 uintmax_t bigvalue = 1;
 char * strarg = NULL;
 bool flag = false;
@@ -31,12 +32,25 @@ static struct dryopt opts[] = {
 	DRYOPT(L'F', "float",	"set fl (double)", REQ_ARG, &fl, 0),
 	// DRYOPT can't be used to init an ENUM_ARG
 	{ L'e', "enum", "pick one of a predetermined set of arguments",
-		ENUM_ARG, 0, 0, sizeof e, &e, .enum_args = enum_args }
+		ENUM_ARG, 0, 0, sizeof e, &e, .enum_args = enum_args },
+	{ 0, "inval", "crash the program", DRYOPT_INVALID, 0, -1, 0, 0 }
 };
 
-int main(int argc __attribute__((unused)), char *const argv[]) {
+int main(int argc __attribute__((unused)), char *const argv[])
+{
 	size_t i = DRYOPT_PARSE(argv, opts);
-	printf("-v %hd	-b %ju	-s %s	-n %d	-F %g\narguments after options:",
+
+	switch (i) {
+	case (size_t)-1:
+		fprintf(stderr, "%s: Panic!\n", *argv);
+		return -1;
+	case (size_t)-2:
+		fprintf(stderr, "%s: DRYopt error: %s\n", *argv, strerror(errno));
+		return 1;
+	}
+
+	printf("-v %"PRId16"	-b %"PRIuMAX"	-s %s	-n %d	-F %g\n"
+		"arguments after options:",
 		value, bigvalue, strarg, flag, fl);
 	while (argv[i])
 		printf("\t%s", argv[i++]);

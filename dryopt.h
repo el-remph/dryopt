@@ -93,6 +93,9 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 }
 
 
+/* Returns number of arguments consumed from argv (ie. optind) on
+   success. On error, returns (size_t)-2 and sets errno, or (size_t)-1 for
+   an internal panic, with errno left undefined. */
 extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_write, 2, 3), nonnull));
 
