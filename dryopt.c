@@ -4,8 +4,9 @@
 /*
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
-		restrict'd pointers, on the other hand, are not always
-	libc:	strtold(3), <stdbool.h>, <float.h>, isfinite(3), printf(3) "%tu"
+		restrict'd pointers, on the other hand, are not always. Some
+		mixing of code and declarations
+	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX)
 */
@@ -24,9 +25,10 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <stdio.h>
 #include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
+#include <wchar.h>	/* wcrtomb(3) */
 
 char const *restrict prognam = NULL;
-struct dryopt_config_s dryopt_config = {0};
+struct dryopt_config_s dryopt_config = { .wrap = 80 };
 
 #if 0
 static int
@@ -69,21 +71,143 @@ err_(const char *restrict const fmt, ...)
 #endif
 
 #define ENUM_MAP_ENTRY(enum_val) [enum_val] = #enum_val
-/* Array size specified, so in the unlikely event that some borked compiler
-   decides to make enum values non-linear, we at least get a warning */
-static char const *restrict enumarg2str[7] = {
-	ENUM_MAP_ENTRY(BOOLEAN),
-	ENUM_MAP_ENTRY(STR),
-	ENUM_MAP_ENTRY(CHAR),
-	ENUM_MAP_ENTRY(SIGNED),
-	ENUM_MAP_ENTRY(UNSIGNED),
-	ENUM_MAP_ENTRY(FLOATING),
-	ENUM_MAP_ENTRY(CALLBACK)
-};
+static char const *__attribute__((__const__, returns_nonnull))
+enum_type2str(enum dryarg_tag const tag)
+{
+	/* Array size specified, so in the unlikely event that some borked compiler
+	   decides to make enum values non-linear, we at least get a warning */
+	static char const *restrict table[FLOATING + 1] = {
+		NULL, // DRYOPT_INVALID
+		ENUM_MAP_ENTRY(STR),
+		ENUM_MAP_ENTRY(CHAR),
+		ENUM_MAP_ENTRY(SIGNED),
+		ENUM_MAP_ENTRY(UNSIGNED),
+		ENUM_MAP_ENTRY(FLOATING)
+	};
 
-extern void __attribute__((cold))
+	return tag >= sizeof table / sizeof *table ? "" : table[tag];
+}
+
+static bool __attribute__((__const__))
+is_strictly_defined(enum dryarg_tag const type)
+{
+	switch (type) {
+	// what about CHAR, requiring the whole string to be one char?
+	case SIGNED: case UNSIGNED: case FLOATING: case CALLBACK:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int __attribute__((format(__printf__, 2, 3), nonnull(2)))
+print_row_printf_helper(FILE * out, char const * fmt, ...)
+{
+	int ret;
+	va_list va;
+	va_start(va, fmt);
+	ret = out ? vfprintf(out, fmt, va) : vsnprintf(NULL, 0, fmt, va);
+	va_end(va);
+	return ret;
+}
+
+static int __attribute__((nonnull(1)))
+print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const out)
+{
+	wchar_t shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
+//	int const unseen_bytes = wcstombs(NULL, shortopt_buf, 0) - wcslen(shortopt_buf);
+	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, NULL) - 1 : 0;
+	char const argsep[2] = {
+		opt->takes_arg && opt->longopt
+		? '='
+		: opt->takes_arg == REQ_ARG || (opt->takes_arg == OPT_ARG && is_strictly_defined(opt->type))
+			? ' '
+			: '\0',
+		'\0'
+	};
+	int ret = print_row_printf_helper (out,
+		"  %ls%s%s%s%s%s",
+		shortopt_buf,
+		opt->shortopt && opt->longopt ? ", " : "",
+		opt->longopt ? "--" : "",
+		opt->longopt ? opt->longopt : "",
+		argsep,
+		opt->takes_arg == OPT_ARG ? "[" : ""
+	);
+
+	if (opt->type == ENUM_ARG) {
+		size_t i = 0;
+		for (; opt->enum_args[i]; i++)
+			ret += print_row_printf_helper(out, "%s%s", i ? "," : "", opt->enum_args[i]);
+	} else if (opt->takes_arg)
+		ret += print_row_printf_helper(out, "%s%s",
+			opt->type == CALLBACK ? "ARG" : enum_type2str(opt->type),
+			opt->takes_arg == OPT_ARG ? "]" : "");
+	// else no arg
+
+	if (unseen_bytes > 0)
+		ret -= unseen_bytes;
+
+	return ret;
+}
+
+static int
+break_space(char const *const s, unsigned offset)
+/* Looks for a space at which to break the string. Starts at offset
+   (ie. length until the margin line) and looks backwards; if unsuccessful,
+   looks forwards instead for the rest of the string. Returns the length of
+   string to print, which may be the whole thing. `unsigned' is to avoid
+   unnecessary sign extension for indices, but the type returned is within
+   [0, INT_MAX], so it can be passed to printf(3) */
+{
+	unsigned const og_offset = offset;
+
+	{
+		char const *const t = memchr(s, 0, offset);
+		if (t)
+			return t - s; // bounded by offset, so no risk of overflow
+	}
+
+	do
+		if (isspace(s[offset]))
+			return offset;
+	while (--offset);
+
+	offset = og_offset;
+	while (offset++ < INT_MAX && s[offset] && !isspace(offset));
+	return offset;
+}
+
+static void __attribute__((nonnull))
+wrap_help_text(FILE *restrict const out, char const *restrict help_text,
+		unsigned const lmargin, unsigned const rmargin, unsigned const already_printed)
+{
+	int break_offset;
+
+	/* everything before the loop is just an extended first iteration
+	   of the loop, accounting for factors that become nonexistent in
+	   subsequent iterations (like already_printed) */
+
+	fprintf(out, "%*s", lmargin > already_printed ? lmargin - already_printed : 0, " ");
+	if (rmargin < lmargin) {
+		fprintf(out, "%s\n", help_text);
+		return;
+	}
+
+	break_offset = break_space(help_text, rmargin - lmargin);
+	fprintf(out, "%.*s\n", break_offset, help_text);
+
+	while (*(help_text += break_offset)) {
+		help_text++;	/* if it gets past the above test,
+				   !!isspace(*help_text), so skip it */
+		break_offset = break_space(help_text, rmargin - lmargin);
+		fprintf(out, "%*s%.*s\n", lmargin, " ", break_offset, help_text);
+	}
+}
+
+extern void __attribute__((cold, leaf))
 auto_help (
-	struct dryopt const opts[],
+	struct dryopt opts[],
 	size_t const optn,
 	FILE *restrict const outfile,
 	char const *restrict const program_name,
@@ -91,37 +215,43 @@ auto_help (
 	char const *restrict const help_extra
 ) {
 	size_t i;
+	int len = 0;
+
+	// first pass: find longest entry string (`  -o, --option=[ARG]')
+	for (i = 0; i < optn; i++) {
+		int l;
+		/* also cheekily fix ENUM_ARG entries */
+		if (opts[i].type == ENUM_ARG)
+			opts[i].takes_arg = REQ_ARG;
+		if (len < (l = print_help_entry(opts + i, NULL)))
+			len = l;
+	}
 
 	fprintf(outfile, "Usage: %s [OPTS] %s\n",
 		program_name, help_args ? help_args : "[ARGS]");
 
 	if (help_extra)
-		fprintf(outfile, "\n%s", help_extra);
+		fprintf(outfile, "%s\n", help_extra);
 
+	// second pass: actually print
 	for (i = 0; i < optn; i++) {
-		fputs("  ", outfile);
-		if (opts[i].shortopt)
-			fprintf(outfile, "-%lc", opts[i].shortopt);
-		if (opts[i].longopt)
-			fprintf(outfile, "%s--%s", opts[i].shortopt ? ", " : "", opts[i].longopt);
-		if (opts[i].arg) {
-			fputc('=', outfile);
-			if (opts[i].optional)
-				fputc('[', outfile);
-			fputs(opts[i].arg == CALLBACK ? "ARG" : enumarg2str[opts[i].arg], outfile);
-			if (opts[i].optional)
-				fputc(']', outfile);
+		int const printed = print_help_entry(opts + i, outfile);
+		if (printed < 0) {
+			perror(program_name);
+			continue;
 		}
+
 		if (opts[i].helpstr)
-			fprintf(outfile, "\t%s", opts[i].helpstr);
-		fputc('\n', outfile);
+			wrap_help_text(outfile, opts[i].helpstr, len + 3, dryopt_config.wrap, printed);
+		else
+			fputc('\n', outfile);
 	}
 }
 
 static bool __attribute__((__const__))
 fits_in_bits(long long unsigned n, size_t const nbits, bool const issigned)
-/* similar to C23's stdc_bit_width(), but can deal with signed as well as
-   unsigned */
+/* similar to C23 `stdc_bit_width(n) <= nbits', but can deal with signed as
+   well as unsigned */
 {
 	union { long long unsigned u; long long i; } arg = {n};
 
@@ -136,14 +266,6 @@ fits_in_bits(long long unsigned n, size_t const nbits, bool const issigned)
 	   if that changes anything) */
 	return (arg.u & mask) == arg.u;
 }
-
-// This represents a parsed arg, to be written to dryopt.argptr
-union parsed_optarg {
-	long long signed i;
-	long long unsigned u;
-	long double f; // f for float
-	void * p;
-};
 
 static bool bigendian;
 static bool __attribute__((__const__))
@@ -164,62 +286,52 @@ copy_word(void *restrict dest, size_t const destz, void const *restrict src, siz
 }
 
 static void
-write_optarg(struct dryopt const *restrict const opt, union parsed_optarg const *restrict const arg)
+write_optarg(struct dryopt const *restrict const opt, union dryoptarg const arg)
+/* If calling this without first calling parse_optarg() (such as if
+   opt->takes_arg == NO_ARG), *BEWARE* opt->type == CALLBACK */
 {
-	switch (opt->arg) {
+	assert(opt->sizeof_arg <= sizeof arg);
+
+	switch (opt->type) {
 		// Sometimes .sizeof_arg is ignored. You were warned!
-	case BOOLEAN:
-		assert(arg->u == !!arg->u);
-		copy_word(opt->argptr, opt->sizeof_arg, arg, sizeof arg->u);
-		break;
 	case STR:
-		*(void**)opt->argptr = arg->p;
+		*(void**)opt->argptr = arg.p;
 		break;
 	case CHAR:
 		/* again, this is unsigned to avoid sign extension. Why don't
 		   I just add a field to the union? */
-		assert(arg->u <= UCHAR_MAX);
-		*(unsigned char*)opt->argptr = (unsigned char)arg->u;
+		assert(arg.u <= UCHAR_MAX);
+		*(unsigned char*)opt->argptr = (unsigned char)arg.u;
 		break;
 
-	case SIGNED: case UNSIGNED:
-		/* We don't use sizeof arg here because arg->f could be 12
-		   or 16 bytes, while arg->i and arg->u is typically 8 */
-		if (sizeof arg->i != opt->sizeof_arg) {
-			assert(sizeof arg->i > opt->sizeof_arg);
-			if (!fits_in_bits(arg->u, opt->sizeof_arg * CHAR_BIT, opt->arg == SIGNED)) {
+	case SIGNED: case UNSIGNED: case ENUM_ARG:
+		/* We don't use sizeof arg here because arg.f could be 12
+		   or 16 bytes, while arg.i and arg.u is typically 8 */
+		if (sizeof arg.i != opt->sizeof_arg) {
+			assert(sizeof arg.i > opt->sizeof_arg);
+			if (!fits_in_bits(arg.u, opt->sizeof_arg * CHAR_BIT, opt->type == SIGNED)) {
 				/* signed output should always make sense here,
 				   since overflow of the long long sign bit is
 				   tested by strtoll(3) earlier */
-				ERR("%lld: %s", arg->i, strerror(ERANGE));
+				ERR("%lld: %s", arg.i, strerror(ERANGE));
 				return;
 			}
 		}
-		copy_word(opt->argptr, opt->sizeof_arg, arg, sizeof arg->u);
+		copy_word(opt->argptr, opt->sizeof_arg, &arg, sizeof arg.u);
 		break;
 
 	case FLOATING:
 		// floating point format is not as simple as integral :(
-		if (sizeof arg->f == opt->sizeof_arg)
-			*(long double*)opt->argptr = arg->f;
+		if (sizeof arg.f == opt->sizeof_arg)
+			*(double*)opt->argptr = arg.f;
 		else {
-			long double const
-				max = opt->sizeof_arg == sizeof(float) ? FLT_MAX : DBL_MAX;
+			assert(opt->sizeof_arg == sizeof(float));
 			// TODO: what about subnormal values?
-			if (isfinite(arg->f) && (arg->f > max || arg->f < -max)) {
-				ERR("%Lg: %s", arg->f, strerror(ERANGE));
+			if (isfinite(arg.f) && (arg.f > FLT_MAX || arg.f < -FLT_MAX)) {
+				ERR("%g: %s", arg.f, strerror(ERANGE));
 				return;
 			}
-			switch (opt->sizeof_arg) {
-			case sizeof(float):
-				*(float*)opt->argptr = (float)arg->f;
-				break;
-			case sizeof(double):
-				*(double*)opt->argptr = (double)arg->f;
-				break;
-			default:
-				abort();
-			}
+			*(float*)opt->argptr = (float)arg.f;
 		}
 		break;
 
@@ -241,19 +353,13 @@ str_n_isnegative(char const * str)
 
 static char *
 parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
-		union parsed_optarg *restrict const parsed)
+		union dryoptarg *restrict const parsed)
 /* returns optstr after the argument was parsed, or NULL if no argument was
    parsed */
 {
 	bool arg_found = false;
 
-	switch (opt->arg) {
-	case BOOLEAN:
-		/* boolean short options take no argument. TODO: what
-		   about unsetting? */
-		parsed->i = 1;
-		arg_found = true;
-		break;
+	switch (opt->type) {
 	case STR:
 		parsed->p = optstr,
 		optstr += strlen(optstr),	// STR consumes the whole rest of the string
@@ -269,7 +375,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		{
 			char * endptr = NULL;
 			errno = 0;
-			switch (opt->arg) {
+			switch (opt->type) {
 			case SIGNED:
 				parsed->i = strtoll(optstr, &endptr, 0);
 				break;
@@ -277,7 +383,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 				parsed->u = strtoull(optstr, &endptr, 0);
 				break;
 			case FLOATING:
-				parsed->f = strtold(optstr, &endptr);
+				parsed->f = strtod(optstr, &endptr);
 				break;
 			default:
 				abort();
@@ -288,7 +394,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 			}
 			arg_found = *optstr && optstr != endptr,
 			optstr = endptr;
-			if (arg_found && opt->arg == UNSIGNED && str_n_isnegative(optstr)) {
+			if (arg_found && opt->type == UNSIGNED && str_n_isnegative(optstr)) {
 				ERR("%s: %s", optstr, strerror(ERANGE));
 				return optstr;
 			}
@@ -300,6 +406,18 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 			arg_found = !!consumed, optstr += consumed;
 			break;
 		}
+	case ENUM_ARG:
+		{
+			size_t i;
+			for (i = 0; opt->enum_args[i]; i++)
+				if (strcmp(optstr, opt->enum_args[i]) == 0) {
+					parsed->u = i,
+					optstr += strlen(optstr),
+					arg_found = true;
+					break;
+				}
+			break;
+		}
 	default:
 		abort();
 	}
@@ -307,20 +425,19 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 	return arg_found ? optstr : NULL;
 }
 
-static bool __attribute__((__const__))
-is_strictly_defined(enum dryarg const type)
+#define ARGNFOUND(optfmt, opt)	\
+		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt)
+
+static bool __attribute__((pure))
+opt_is_boolean(struct dryopt const *const opt)
 {
-	switch (type) {
-	case SIGNED: case UNSIGNED: case FLOATING: // what about CALLBACK?
-		return true;
-	default:
-		return false;
-	}
+	return opt->type == UNSIGNED && opt->takes_arg == NO_ARG
+		&& opt->assign_val.u == 1;
 }
 
 // Returns n of arguments consumed from argv
 static size_t
-parse_longopt(char *const argv[], struct dryopt const opts[], size_t const optn)
+parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 /*	if (dryopt_config.sorting) { //}
 		bsearch(longopt, opts, optn, sizeof *opts, */
@@ -348,7 +465,7 @@ parse_longopt(char *const argv[], struct dryopt const opts[], size_t const optn)
 			neg_long_opt++;
 
 		for (opti = 0; opti < optn; opti++) {
-			if (opts[opti].longopt && opts[opti].arg == BOOLEAN
+			if (opts[opti].longopt && opt_is_boolean(opts + opti)
 				&& strcmp(neg_long_opt, opts[opti].longopt) == 0)
 			{
 				memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
@@ -370,25 +487,29 @@ parse_longopt(char *const argv[], struct dryopt const opts[], size_t const optn)
 	return argi;
 
 	// inaccessible except by goto label:
-found:	if (opts[opti].arg == BOOLEAN)
-		if (long_arg) // TODO: parse yes|no|true|false|[10] as an argument
+found:	if (opts[opti].type == ENUM_ARG)
+		opts[opti].takes_arg = REQ_ARG;
+
+	if (opts[opti].takes_arg == NO_ARG)
+		if (long_arg)
+			// TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
-		else {
-			union parsed_optarg parsed = {1};
-			write_optarg(opts + opti, &parsed);
-		}
+		else if (opts[opti].type == CALLBACK)
+			((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+		else
+			write_optarg(opts + opti, opts[opti].assign_val);
 	else {
 		char * og_long_arg = long_arg;
-		union parsed_optarg parsed;
+		union dryoptarg parsed;
 
 		/* TODO: redundancy between this and the equivalent code in
 		   parse_shortopts(); move out and merge into a function */
 		if (long_arg)
 thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
 		else {
-			if (opts[opti].optional) {
+			if (opts[opti].takes_arg == OPT_ARG) {
 				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].arg) && argv[argi]) {
+				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
 					long_arg = parse_optarg(opts + opti, argv[argi], &parsed);
 					if (long_arg && !*long_arg)
 						og_long_arg = argv[argi++];
@@ -402,15 +523,15 @@ thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
 		}
 
 		if (long_arg) {
-			write_optarg(opts + opti, &parsed);
+			write_optarg(opts + opti, parsed);
 			if (*long_arg)
 				ERR("trailing junk after %tu bytes of argument to --%s: %s",
 					og_long_arg - long_arg, longopt, og_long_arg);
 					// TODO: shouldn't this return?
-		} else if (opts[opti].optional)
+		} else if (opts[opti].takes_arg == OPT_ARG)
 			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
 		else {
-arg_not_found:		ERR("missing argument for --%s", longopt);
+arg_not_found:		ARGNFOUND("--%s", longopt);
 			return argi;
 		}
 	}
@@ -420,7 +541,7 @@ arg_not_found:		ERR("missing argument for --%s", longopt);
 
 
 static size_t
-parse_shortopts(char *const argv[], struct dryopt const opts[], size_t const optn)
+parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 	size_t argi = 0, opti;
 	char * optstr = argv[argi++];
@@ -452,10 +573,20 @@ parse_shortopts(char *const argv[], struct dryopt const opts[], size_t const opt
 			continue;
 		}
 
-found:		union parsed_optarg parsed;
+found:		union dryoptarg parsed;
 		char * new_optstr = NULL;
 
 		// Now we go back to multibyte processing
+		if (opts[opti].type == ENUM_ARG)
+			opts[opti].takes_arg = REQ_ARG;
+
+		if (opts[opti].takes_arg == NO_ARG) {
+			if (opts[opti].type == CALLBACK)
+				((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+			else
+				write_optarg(opts + opti, opts[opti].assign_val);
+			continue;
+		}
 
 		/* An earlier version of this used gotos to skip extraneous
 		   tests (like setting new_optstr to NULL, then immediately
@@ -464,10 +595,10 @@ found:		union parsed_optarg parsed;
 		   flags twice; a compiler could even optimise some cases
 		   out. Moreover, this version is less unreadable
 		        ^ That was premature. This is not pretty. TODO: function */
-		if (opts[opti].arg != BOOLEAN && !*optstr)
-			if (opts[opti].optional) {
+		if (!*optstr)
+			if (opts[opti].takes_arg == OPT_ARG) {
 				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].arg) && argv[argi]) {
+				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
 					new_optstr = parse_optarg(opts + opti, argv[argi], &parsed);
 					/* if the whole of the next arg was
 					   successfully consumed, make the peekahead
@@ -493,25 +624,23 @@ thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 		}
 
 		if (new_optstr) {
-			write_optarg(opts + opti, &parsed);
+			write_optarg(opts + opti, parsed);
 			if (argi > 1 && optstr && *optstr) {
 				ERR("trailing junk after %td bytes of argument to -%lc: %s",
 					optstr - argv[argi - 1], wc, argv[argi - 1]);
 				return argi;
 			}
-		} else if (opts[opti].optional)
+		} else if (opts[opti].takes_arg == OPT_ARG)
 			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
 		else {
-arg_not_found:		ERR("missing %s arg to -%lc",
-				opts[opti].arg == CALLBACK ? "" : enumarg2str[opts[opti].arg],
-				wc);
+arg_not_found:		ARGNFOUND("-%lc", wc);
 			return argi;
 		}
 	}
 }
 
 extern size_t
-dryopt_parse(char *const argv[], struct dryopt const opts[], size_t const optn)
+dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 	size_t argi = 1;
 	prognam = argv[0];

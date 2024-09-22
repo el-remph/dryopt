@@ -59,12 +59,13 @@ done
 
 help_output="\
 Usage: ./tests/test-bin [OPTS] [ARGS]
-  -v, --value=SIGNED	set value
-  -b, --bigvalue=[UNSIGNED]	set bigvalue
-  -c, --callback=[ARG]	call callback
-  -s, --strarg=[STR]	set strarg
-  -n, --flag	boolean; takes no argument
-  -F, --float=FLOATING	set fl (double)"
+  -v, --value=SIGNED             set value
+  -b, --bigvalue=[UNSIGNED]      set bigvalue
+  -c, --callback=[ARG]           call callback
+  -s, --strarg=[STR]             set strarg
+  -n, --flag                     boolean; takes no argument
+  -F, --float=FLOATING           set fl (double)
+  -e, --enum=never,auto,always   pick one of a predetermined set of arguments"
 do_test "$help_output" -h
 do_test "$help_output" '-?'
 do_test "$help_output" --help
@@ -97,7 +98,15 @@ arguments after options:'	\
 done
 
 # Don't segfault if the argument is mandatory either; try to fail with grace
-fail_test "$exe: missing FLOATING arg to -F" -F
-for i in --float --float=; do
-	fail_test "$exe: missing argument for --float" $i
+for i in -F --float --float=; do
+	fail_test "$exe: missing FLOATING argument to ${i%=}" $i
+done
+
+for i in -c --callback; do
+	do_test 'callback saw: yeeble
+-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:	deeble' $i yeeble deeble
+	do_test 'callback saw: (null)
+-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:' $i
 done
