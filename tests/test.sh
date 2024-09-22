@@ -65,7 +65,8 @@ Usage: ./tests/test-bin [OPTS] [ARGS]
   -s, --strarg=[STR]             set strarg
   -n, --flag                     boolean; takes no argument
   -F, --float=FLOATING           set fl (double)
-  -e, --enum=never,auto,always   pick one of a predetermined set of arguments"
+  -e, --enum=never,auto,always   pick one of a predetermined set of arguments
+  -h, -?, --help                 Print this help and exit"
 do_test "$help_output" -h
 do_test "$help_output" '-?'
 do_test "$help_output" --help

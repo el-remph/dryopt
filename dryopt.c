@@ -27,7 +27,10 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <string.h>
 #include <wchar.h>	/* wcrtomb(3) */
 
-char const *restrict prognam = NULL;
+// global defaults
+char const	*restrict prognam = NULL,
+		*restrict DRYopt_help_args = NULL,
+		*restrict DRYopt_help_extra = NULL;
 struct dryopt_config_s dryopt_config = { .wrap = 80 };
 
 #if 0
@@ -209,13 +212,11 @@ extern void __attribute__((cold, leaf))
 auto_help (
 	struct dryopt opts[],
 	size_t const optn,
-	FILE *restrict const outfile,
-	char const *restrict const program_name,
-	char const *restrict const help_args,
-	char const *restrict const help_extra
+	FILE *restrict const outfile
 ) {
+	static char const help_entry[] = "  -h, -?, --help";
+	int len = sizeof help_entry - 1;
 	size_t i;
-	int len = 0;
 
 	// first pass: find longest entry string (`  -o, --option=[ARG]')
 	for (i = 0; i < optn; i++) {
@@ -228,16 +229,16 @@ auto_help (
 	}
 
 	fprintf(outfile, "Usage: %s [OPTS] %s\n",
-		program_name, help_args ? help_args : "[ARGS]");
+		prognam, DRYopt_help_args ? DRYopt_help_args : "[ARGS]");
 
-	if (help_extra)
-		fprintf(outfile, "%s\n", help_extra);
+	if (DRYopt_help_extra)
+		fprintf(outfile, "%s\n", DRYopt_help_extra);
 
 	// second pass: actually print
 	for (i = 0; i < optn; i++) {
 		int const printed = print_help_entry(opts + i, outfile);
 		if (printed < 0) {
-			perror(program_name);
+			perror(prognam);
 			continue;
 		}
 
@@ -246,6 +247,10 @@ auto_help (
 		else
 			fputc('\n', outfile);
 	}
+
+	fputs(help_entry, outfile);
+	wrap_help_text(outfile, "Print this help and exit", len + 3,
+			dryopt_config.wrap, sizeof help_entry - 1);
 }
 
 static bool __attribute__((__const__))
@@ -480,7 +485,7 @@ parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 
 	// fallen through from above loop: not found
 	if (strcmp(longopt, "help") == 0) {
-		auto_help(opts, optn, stdout, prognam, NULL, NULL);
+		auto_help(opts, optn, stdout);
 		exit(EXIT_SUCCESS);
 	}
 	ERR("unrecognised long option: %s", longopt);
@@ -566,7 +571,7 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 		// fallen through at end of loop: not found
 		switch (wc) {
 		case L'h': case L'?':
-			auto_help(opts, optn, stdout, prognam, NULL, NULL);
+			auto_help(opts, optn, stdout);
 			exit(EXIT_SUCCESS);
 		default:
 			ERR("unrecognised option: %lc", wc);
@@ -643,7 +648,8 @@ extern size_t
 dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 	size_t argi = 1;
-	prognam = argv[0];
+	if (!prognam)
+		prognam = argv[0];
 	bigendian = init_bigendian();
 
 #if 0

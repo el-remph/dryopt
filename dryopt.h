@@ -90,9 +90,7 @@ extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_only, 2, 3), nonnull));
 
 /* Note: this returns! */
-extern void auto_help(	struct dryopt opts[], size_t optn,
-			FILE *restrict outfile, char const *restrict program_name,
-			char const *restrict help_args, char const *restrict help_extra)
+extern void auto_help(struct dryopt opts[], size_t optn, FILE *restrict outfile)
 	__attribute__((cold, leaf));
 
 extern struct dryopt_config_s {
@@ -114,6 +112,11 @@ extern struct dryopt_config_s {
 	   enough */
 	unsigned wrap: 10;
 } dryopt_config;
+
+/* These affect the output of auto_help(); prognam also affects diagnostics
+   printed by DRYopt unless dryopt.autodie == noop. They are zero-initialised,
+   although dryopt_parse() sets prognam */
+extern char const *restrict prognam, *restrict DRYopt_help_args, *restrict DRYopt_help_extra;
 
 /* WARNING! <OPTS> may be evaluated twice! */
 #define DRYOPT_PARSE(ARGV, OPTS) dryopt_parse((ARGV), (OPTS), sizeof(OPTS) / sizeof(struct dryopt))
