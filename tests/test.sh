@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -efu +m
 
 exe=./$1
 
@@ -111,3 +111,14 @@ arguments after options:	deeble' $i yeeble deeble
 -v 0	-b 1	-s (null)	-n 0	-F 0
 arguments after options:' $i
 done
+
+# Preserve `-' as a positional argument
+do_test '-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:	-'	\
+	-
+do_test '-v 0	-b 1	-s (null)	-n 1	-F 0
+arguments after options:	-'	\
+	-n -
+do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
+arguments after options:	-'	\
+	-b -

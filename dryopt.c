@@ -666,13 +666,15 @@ dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 		if (argv[argi][0] != '-')
 			break;
 
-		if (argv[argi][1] == '-') {
-			if (argv[argi][2] == '\0') {
-				/* `--' */
-				argi++;
-				break;
-			}
+		switch (argv[argi][1]) {
+		case '-':
+			if (argv[argi][2] == '\0')
+				return ++argi;	// `--'
+			// else
 			islong = true;
+			break;
+		case 0:
+			return argi;	// `-', as in stdin
 		}
 
 		argi += (islong ? parse_longopt : parse_shortopts)(argv + argi, opts, optn);
