@@ -99,18 +99,24 @@ extern struct dryopt_config_s {
 	enum { die = 0, complain, noop } autodie: 2;
 	unsigned no_setlocale: 1;
 
+	/* Set this to begin bundled short-option arguments with +n to unset
+	   instead of set them (like in the sh(1) `set' builtin. Only works
+	   on boolean short options (must take no arguments), will error on
+	   anything else! */
+	unsigned plus_negates_bool: 1;
+
 	/* this one is an output field: it starts at 0, and is set to 1 on
 	   error. This is redundant unless autodie != die */
 	unsigned mistakes_were_made: 1;
 
 	/* number of columns to wrap auto_help() output to. Default is 80;
-	   set to 0 to disable wrapping. Ten bits fills out to a 16-bit
-	   word, and allows wrapping up to 1023 (0x3FF) columns, which is
+	   set to 0 to disable wrapping. 9 bits fills out to a 16-bit
+	   word, and allows wrapping up to 511 (0777) columns, which is
 	   plenty: I get 255 on a 2560x1440 screen with 12.5pt font, but
 	   bigger screens and smaller fonts are available. But does anyone
-	   like to read lines that long? If anything 10 bits is more than
+	   like to read lines that long? If anything 9 bits is more than
 	   enough */
-	unsigned wrap: 10;
+	unsigned wrap: 9;
 } dryopt_config;
 
 /* These affect the output of auto_help(); prognam also affects diagnostics
@@ -118,7 +124,7 @@ extern struct dryopt_config_s {
    although dryopt_parse() sets prognam */
 extern char const *restrict prognam, *restrict DRYopt_help_args, *restrict DRYopt_help_extra;
 
-/* WARNING! <OPTS> may be evaluated twice! */
+/* WARNING! <OPTS> may be evaluated twice! (But probably not) */
 #define DRYOPT_PARSE(ARGV, OPTS) dryopt_parse((ARGV), (OPTS), sizeof(OPTS) / sizeof(struct dryopt))
 
 #endif /* DRYOPT_H */

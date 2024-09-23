@@ -122,3 +122,12 @@ arguments after options:	-'	\
 do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
 arguments after options:	-'	\
 	-b -
+
+# Negate with +
+for i in '-n +n' '+n -n +n'; do
+	do_test '-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:'	$i
+done
+do_test '-v 0	-b 1	-s (null)	-n 1	-F 0
+arguments after options:'	\
+	+n -n

@@ -555,14 +555,16 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 
 	for (;;) {
 		wchar_t wc;
-		int conv_ret = mbtowc(&wc, optstr, MB_CUR_MAX);
-		if (conv_ret <= 0) {
-			if (conv_ret < 0)
-				ERR("%s: byte %tu of `%s'",
-					strerror(errno), optstr - *argv, *argv);
-			return argi;
+		{
+			int conv_ret = mbtowc(&wc, optstr, MB_CUR_MAX);
+			if (conv_ret <= 0) {
+				if (conv_ret < 0)
+					ERR("%s: byte %tu of `%s'",
+						strerror(errno), optstr - *argv, *argv);
+				return argi;
+			}
+			optstr += conv_ret;
 		}
-		optstr += conv_ret;
 
 		for (opti = 0; opti < optn; opti++)
 			if (opts[opti].shortopt == wc)
@@ -644,6 +646,42 @@ arg_not_found:		ARGNFOUND("-%lc", wc);
 	}
 }
 
+static void // will only ever consume one arg
+parse_negated_shortopt(char const *restrict optstr, struct dryopt opts[], size_t const optn)
+{
+	char const *const og_optstr = optstr;
+	assert(*optstr == '+');
+	optstr++;
+
+	for (;;) {
+		size_t opti;
+		wchar_t wc;
+		{
+			int conv_ret = mbtowc(&wc, optstr, MB_CUR_MAX);
+			if (conv_ret <= 0) {
+				if (conv_ret < 0)
+					ERR("%s: byte %tu of `%s'",
+						strerror(errno), optstr - og_optstr, og_optstr);
+				return;
+			}
+			optstr += conv_ret;
+		}
+
+		for (opti = 0; opti < optn; opti++)
+			if (opts[opti].shortopt == wc)
+				goto found;
+
+		// fallen through at end of loop: not found
+		ERR("unrecognised option: %lc", wc);
+		continue;
+
+found:		if (opt_is_boolean(opts + opti))
+			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+		else
+			ERR("can't unset a non-boolean option: %lc", wc);
+	}
+}
+
 extern size_t
 dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 {
@@ -663,21 +701,30 @@ dryopt_parse(char *const argv[], struct dryopt opts[], size_t const optn)
 	while (argv[argi]) {
 		bool islong = false;
 
-		if (argv[argi][0] != '-')
-			break;
-
-		switch (argv[argi][1]) {
+		switch (argv[argi][0]) {
 		case '-':
-			if (argv[argi][2] == '\0')
-				return ++argi;	// `--'
-			// else
-			islong = true;
-			break;
-		case 0:
-			return argi;	// `-', as in stdin
-		}
+			switch (argv[argi][1]) {
+			case '-':
+				if (argv[argi][2] == '\0')
+					return ++argi;	// `--'
+				// else
+				islong = true;
+				break;
+			case 0:
+				return argi;	// `-', as in stdin
+			}
 
-		argi += (islong ? parse_longopt : parse_shortopts)(argv + argi, opts, optn);
+			argi += (islong ? parse_longopt : parse_shortopts)(argv + argi, opts, optn);
+			break;
+		case '+':
+			if (dryopt_config.plus_negates_bool && argv[argi][1]) {
+				parse_negated_shortopt(argv[argi++], opts, optn);
+				break;
+			} else
+				__attribute__((fallthrough));
+		default:
+			return argi;
+		}
 	}
 
 	return argi;

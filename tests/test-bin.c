@@ -29,18 +29,24 @@ static struct dryopt opts[] = {
 	DRYOPT(L's', "strarg",	"set strarg", OPT_ARG, &strarg, 0),
 	DRYOPT(L'n', "flag",	"boolean; takes no argument", NO_ARG, &flag, 1),
 	DRYOPT(L'F', "float",	"set fl (double)", REQ_ARG, &fl, 0),
-	// DRYOPT can't be used to init an ENUM_ARG
+	// DRYOPT() can't be used to init an ENUM_ARG
 	{ L'e', "enum", "pick one of a predetermined set of arguments",
 		ENUM_ARG, 0, sizeof e, &e, .enum_args = enum_args }
 };
 
 int main(int argc __attribute__((unused)), char *const argv[]) {
-	size_t i = DRYOPT_PARSE(argv, opts);
+	size_t i;
+
+	dryopt_config.plus_negates_bool = true;
+	i = DRYOPT_PARSE(argv, opts);
+
 	printf("-v %"PRId16"	-b %"PRIuMAX"	-s %s	-n %d	-F %g\n"
 		"arguments after options:",
 		value, bigvalue, strarg, flag, fl);
+
 	while (argv[i])
 		printf("\t%s", argv[i++]);
 	putchar('\n');
+
 	return 0;
 }
