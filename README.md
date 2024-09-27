@@ -59,7 +59,20 @@ churning out lines of boilerplate getopt(3) code.
 - Some basic C99 features, widely implemented before C99 (eg. old GCC, even
   MSVC); see top of [dryopt.c](dryopt.c) for details
 - C11 for the optional but very handy `DRYOPT()` macro for the caller
-- No UNIVACs, no PDP-11s, no Harvard microcontrollers
+- No UNIVACs, no PDP-11s
+
+### Tested on: ###
+
+|			| GCC	| Clang	| [TCC]	| [cproc] |
+| ---------------------	| ---	| -----	| -----	| ------- |
+| *amd64 Linux/GNU*	|14.2.1	|18.1.8	| 0.9.27| f66a661 |
+| *amd64 Linux/musl*	|14.2.1	|18.1.8	|	|         |
+
+NB: For musl-based binaries, tests/test.sh was run with
+`erange_str='Result not representable'` in its environment
+
+[TCC]: https://bellard.org/tcc/
+[cproc]: https://git.sr.ht/~mcf/cproc
 
 ## Missing features (may or may not be implemented later) ##
 

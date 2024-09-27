@@ -5,7 +5,7 @@
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
 		restrict'd pointers, on the other hand, are not always. Some
-		mixing of code and declarations
+		mixing of code and declarations, some designated initialisers
 	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX), anonymous union (widely available and
@@ -24,9 +24,9 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
+#include <stdlib.h>	/* exit(3), strtou?ll(3), abort(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
-#include <wchar.h>	/* wcrtomb(3) */
+#include <wchar.h>	/* mbrtowc(3), wcrtomb(3) */
 
 // global defaults
 char const	*restrict prognam = NULL,
@@ -118,9 +118,10 @@ print_row_printf_helper(FILE * out, char const * fmt, ...)
 static int __attribute__((nonnull(1)))
 print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const out)
 {
-	wchar_t shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
+	wchar_t const shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
 //	int const unseen_bytes = wcstombs(NULL, shortopt_buf, 0) - wcslen(shortopt_buf);
-	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, NULL) - 1 : 0;
+	mbstate_t ps = {0};
+	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, &ps) - 1 : 0;
 	char const argsep[2] = {
 		opt->takes_arg && opt->longopt
 		? '='
@@ -288,7 +289,7 @@ init_bigendian(void)
 static void
 copy_word(void *restrict dest, size_t const destz, void const *restrict src, size_t srcz)
 {
-	memcpy(dest, bigendian ? src + srcz - destz : src, destz);
+	memcpy(dest, bigendian ? (char const*)src + srcz - destz : src, destz);
 }
 
 static union dryoptarg
@@ -414,7 +415,10 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 			default:
 				abort();
 			}
-			if (errno) {
+			switch (errno) {
+			case 0: case EINVAL:
+				break;
+			default:
 				ERR("%s: %s", optstr, strerror(errno));
 				return optstr;
 			}
@@ -428,7 +432,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		}
 	case CALLBACK:
 		{
-			size_t const consumed = ((dryopt_callback)opt->argptr)(opt, optstr);
+			size_t const consumed = opt->callback(opt, optstr);
 			arg_found = !!consumed, optstr += consumed;
 			break;
 		}
@@ -538,7 +542,7 @@ found:	if (opts[opti].type == ENUM_ARG)
 			// TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
 		else if (opts[opti].type == CALLBACK)
-			((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+			opts[opti].callback(opts + opti, NULL);
 		else
 			write_optarg(opts + opti, opts[opti].assign_val);
 	else {
@@ -588,12 +592,14 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 	size_t argi = 0, opti;
 	char * optstr = argv[argi++];
+	mbstate_t ps = {0};
+
 	if (*optstr == '-')
 		optstr++;
 
 	for (;;) {
 		wchar_t wc;
-		int conv_ret = mbtowc(&wc, optstr, MB_CUR_MAX);
+		int conv_ret = mbrtowc(&wc, optstr, MB_CUR_MAX, &ps);
 		if (conv_ret <= 0) {
 			if (conv_ret < 0)
 				ERR("%s: byte %tu of `%s'",
@@ -625,7 +631,7 @@ found:		union dryoptarg parsed;
 
 		if (opts[opti].takes_arg == NO_ARG) {
 			if (opts[opti].type == CALLBACK)
-				((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+				opts[opti].callback(opts + opti, NULL);
 			else
 				write_optarg(opts + opti, opts[opti].assign_val);
 			continue;

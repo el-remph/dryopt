@@ -44,11 +44,13 @@ arguments after options:	-bar	foo	mung'	\
 	-nv-32768 --no-flag -- -bar foo mung
 
 export LANG=C
-if type errno >/dev/null 2>&1; then
-	erange_str=`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`
-#	erange_str=${erange_str#'ERANGE 34 '}
-else
-	erange_str='Numerical result out of range'
+if test -z "${erange_str-}"; then
+	if type errno >/dev/null 2>&1; then
+		erange_str=`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`
+#		erange_str=${erange_str#'ERANGE 34 '}
+	else
+		erange_str='Numerical result out of range'
+	fi
 fi
 
 # overflow tests
@@ -60,11 +62,11 @@ help_output="\
 Usage: ./tests/test-bin [OPTS] [ARGS]
   -v, --value=SIGNED             set value
   -b, --bigvalue=[UNSIGNED]      set bigvalue
-  -c, --callback=[ARG]           call callback
   -s, --strarg=[STR]             set strarg
   -n, --flag                     boolean; takes no argument
   -F, --float=FLOATING           set fl (double)
   -e, --enum=never,auto,always   pick one of a predetermined set of arguments
+  -c, --callback=[ARG]           call callback
   -h, -?, --help                 Print this help and exit"
 do_test "$help_output" -h
 do_test "$help_output" '-?'
