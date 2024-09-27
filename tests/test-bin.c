@@ -31,7 +31,7 @@ static struct dryopt opts[] = {
 	DRYOPT(L'F', "float",	"set fl (double)", REQ_ARG, &fl, 0),
 	// DRYOPT() can't be used to init an ENUM_ARG
 	{ L'e', "enum", "pick one of a predetermined set of arguments",
-		ENUM_ARG, 0, sizeof e, &e, .enum_args = enum_args }
+		ENUM_ARG, 0, 0, sizeof e, &e, .enum_args = enum_args }
 };
 
 int main(int argc __attribute__((unused)), char *const argv[]) {

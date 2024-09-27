@@ -27,6 +27,10 @@ struct dryopt {
 	/* overwritten with REQ_ARG if .type is ENUM_ARGS */
 	enum { NO_ARG = 0, OPT_ARG, REQ_ARG } takes_arg: 2;
 
+	/* Similar to popt(3) POPT_ARGFLAG_(OR|AND|XOR). No equivalent to
+	   POPT_{ARGFLAG_NOT,BIT_{SET,CLR}} -- do it yourself you lazy sod */
+	enum { DRYARG_WRITE = 0, DRYARG_AND, DRYARG_OR, DRYARG_XOR } set_arg: 2;
+
 	/* ignored if .type is STR, CHAR or CALLBACK. maximum sizeof
 	   .assign_val (8, 010) */
 	unsigned sizeof_arg: 4;
@@ -57,11 +61,7 @@ struct dryopt {
    was invalid */
 typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 
-/* BEWARE! <ARGPTR> may be evaluated multiple times!
-   Also, this one depends on C11 _Generic. If you lack that, you'll have to
-   fill out the struct yourself */
-#define DRYOPT(SHORT, LONG, HELP, TAKES_ARG, ARGPTR, VAL) {	\
-	.shortopt = (SHORT), .longopt = (LONG), .helpstr = (HELP),	\
+#define DRYARG(ARGPTR)	\
 	.type = _Generic((ARGPTR),			\
 			_Bool*:	UNSIGNED,		\
 			char**:	STR,			\
@@ -78,16 +78,23 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 			float*:		FLOATING,	\
 			double*:	FLOATING,	\
 			dryopt_callback:	CALLBACK),	\
-	.takes_arg = TAKES_ARG,				\
 	.sizeof_arg = _Generic((ARGPTR),		\
 			char**: 0,			\
 			dryopt_callback: 0,		\
 			default: sizeof *(ARGPTR)),	\
-	.argptr = (ARGPTR), .assign_val = {VAL} }
+	.argptr = (ARGPTR)
+
+/* BEWARE! <ARGPTR> may be evaluated multiple times!
+   Also, this one depends on C11 _Generic. If you lack that, you'll have to
+   fill out the struct yourself */
+#define DRYOPT(SHORT, LONG, HELP, TAKES_ARG, ARGPTR, VAL) {		\
+	.shortopt = (SHORT), .longopt = (LONG), .helpstr = (HELP),	\
+	DRYARG(ARGPTR), .takes_arg = TAKES_ARG,	.assign_val = {VAL}	\
+}
 
 
 extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
-	__attribute__((__access__(read_only, 2, 3), nonnull));
+	__attribute__((__access__(read_write, 2, 3), nonnull));
 
 /* Note: this returns! */
 extern void auto_help(struct dryopt opts[], size_t optn, FILE *restrict outfile)

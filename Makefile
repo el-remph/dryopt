@@ -4,13 +4,17 @@ CFLAGS = -pipe -Wall -Wextra -ggdb3 -std=c99
 LDLIBS = -lm
 dryopt.o: dryopt.h
 
-test: tests/test-bin
-	./tests/test.sh $<
+TESTBINS = tests/test-bin tests/test-mask
+TESTOBJS = ${TESTBINS:=.o}
+
+test: ${TESTBINS}
+	./tests/test.sh tests/test-bin
+	./tests/test-mask.sh tests/test-mask
 	@echo 'Test succeeded!'
 
-tests/test-bin: dryopt.o
+${TESTBINS}: dryopt.o
+${TESTOBJS}: dryopt.h
 tests/test-bin.o: CFLAGS += -std=c11
-tests/test-bin.o: dryopt.h
 
 clean:
-	rm -fv tests/test-bin tests/test-bin.o dryopt.o
+	rm -fv ${TESTBINS} ${TESTOBJS} dryopt.o
