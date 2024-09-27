@@ -1,5 +1,5 @@
 #!/bin/sh
-set -efu +m
+set -efmu
 exe=./$1
 
 do_test() {
@@ -15,21 +15,39 @@ do_test() {
 	fi
 }
 
-i=-1
-while test $((++i)) -lt 16; do
-	args=
-	set -- foo bar mung snark
-	for j in 1 2 4 8; do
-		if test 0 -ne $(( i & j )); then
-			set -- $@ --$1
-		fi
-		shift
+test_range() {
+	start=$1 end=$2
+	for i in `seq $start $end`; do
+		set -- foo bar mung snark
+		for j in 1 2 4 8; do
+			if test 0 -ne $(( i & j )); then
+				set -- $@ --$1
+			fi
+			shift
+		done
+
+		do_test $i $@
+
+		# I can explain -- 15 is 0b1111, which is (_BitInt(4))-1, so XORing
+		# it with $i flips the mask, just like setting every option and then
+		# unsetting those corresponding to $i
+		do_test $((i ^ 15)) --foo --bar --mung --snark ${@/#--/--no-}	# FIXME: that last substitution wants bash
 	done
+}
 
-	do_test $i $@
-
-	# I can explain -- 15 is 0b1111, which is (_BitInt(4))-1, so XORing
-	# it with $i flips the mask, just like setting every option and then
-	# unsetting those corresponding to $i
-	do_test $((i ^ 15)) --foo --bar --mung --snark ${@/#--/--no-}	# FIXME: that last substitution wants bash
+nproc=`nproc`
+# 16 is the number of tests to do, testing 0..15. I don't think starting
+# more than 4 jobs will be worth it
+interval=$(( 16 / (nproc >= 4 ? 4 : 2) ))
+pids=
+for i in `seq 0 $interval 15`; do
+	test_range $i $(( i + interval - 1 )) &
+	pids="$pids $!"
 done
+
+exit_val=0
+for pid in $pids; do
+	# get return values
+	wait $pid || exit_val=$?
+done
+exit $exit_val
