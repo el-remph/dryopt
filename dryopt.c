@@ -115,6 +115,15 @@ print_row_printf_helper(FILE * out, char const * fmt, ...)
 	return ret;
 }
 
+static bool __attribute__((pure))
+opt_is_boolean(struct dryopt const *const opt)
+// derived from negated_boolean_longopt() below
+{
+	return opt->type == UNSIGNED && !opt->takes_arg
+		&& ((!opt->set_arg && opt->assign_val.u == 1)
+		    || opt->set_arg == DRYARG_OR);
+}
+
 static int __attribute__((nonnull(1)))
 print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const out)
 {
@@ -134,7 +143,7 @@ print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const o
 		"  %ls%s%s%s%s%s",
 		shortopt_buf,
 		opt->shortopt && opt->longopt ? ", " : "",
-		opt->longopt ? "--" : "",
+		opt->longopt ? opt_is_boolean(opt) ? "--[no-]" : "--" : "",
 		opt->longopt ? opt->longopt : "",
 		argsep,
 		opt->takes_arg == OPT_ARG ? "[" : ""

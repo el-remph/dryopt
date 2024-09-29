@@ -63,7 +63,7 @@ Usage: ./tests/test-bin [OPTS] [ARGS]
   -v, --value=SIGNED             set value
   -b, --bigvalue=[UNSIGNED]      set bigvalue
   -s, --strarg=[STR]             set strarg
-  -n, --flag                     boolean; takes no argument
+  -n, --[no-]flag                boolean; takes no argument
   -F, --float=FLOATING           set fl (double)
   -e, --enum=never,auto,always   pick one of a predetermined set of arguments
   -c, --callback=[ARG]           call callback
