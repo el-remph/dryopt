@@ -572,7 +572,7 @@ thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
 					og_long_arg - long_arg, longopt, og_long_arg);
 					// TODO: shouldn't this return?
 		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+			write_optarg(opts + opti, opts[opti].assign_val);
 		else {
 arg_not_found:		ARGNFOUND("--%s", longopt);
 			return argi;
@@ -674,7 +674,7 @@ thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
 				return argi;
 			}
 		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
+			write_optarg(opts + opti, opts[opti].assign_val);
 		else {
 arg_not_found:		ARGNFOUND("-%lc", wc);
 			return argi;
