@@ -9,14 +9,38 @@ churning out lines of boilerplate getopt(3) code.
 - Minimal code to write for caller -- options are parsed in a single function
   call without loops as would be the case with getopt(3); functionality lost
   from this can be implemented through [argp]-style callbacks
-- Automatic `--help` generation
+- [Automatic `--help` generation](#automatic---help-generation)
 - Cool [type system](#type-system)
 - wchar_t options allowed (UTF-32 on sane systems, equivalent on FreeBSD and
   Solaris, UCS-2 on W*ndows); respects locale
 - No heap allocation, and not too intrusive with the globals
 - Single-{source,header,object}
 
+### Automatic `--help` generation ###
+
+When using getopt(3), if you change any part of the CLI, you have to change:
+
+- The argument parsing code
+- The `--help` output
+- The manpage
+
+And since only the first of those *has* to be changed, it's easy for
+documentation to go out of sync. [GNU help2man] keeps the manpage in sync
+with the `--help` output and saves the programmer from having to write
+that too, and [recommends] use of [argp] or [popt]\(3) to specify option
+help with the options themselves. However, they both implement a great
+deal more functionality and flexibility than getopt(3), and more than most
+callers will need, thus requiring more work from the caller when writing
+the option-parsing, and from the program at runtime in the case of popt(3)
+which requires heap allocation. The aim of DRYopt is to handle simpler
+cases than argp and popt(3) are aimed at, with a simpler interface and more
+minimal code, without having the programmer repeat themselves in maintaining
+documentation.
+
+[GNU help2man]: https://www.gnu.org/s/help2man
+[recommends]: https://www.gnu.org/software/help2man/#g_t_002d_002dhelp-Recommendations
 [argp]: https://sourceware.org/glibc/manual/latest/html_node/Argp.html
+[popt]: https://github.com/rpm-software-management/popt
 
 ### Type System ###
 
@@ -40,8 +64,9 @@ churning out lines of boilerplate getopt(3) code.
   the getopt(3) method (which is still used for non-numeric types) where
   `-o ARG` syntax is no longer available and options must be set as
   `-oARG`. For instance, given option `-a` takes an optional FLOATING
-  argument and option `-b` takes no argument (all the following examples
+  argument and option `-b` takes no argument (*all* of the following examples
   set `-b`):
+  - `-a2b` sets `-a` to 2.0
   - `-a12.008e2b` sets `-a` to 1200.8
   - `-ab` sets `-a` to 0
   - `-a -2 -b` sets `-a` to -2.0
@@ -67,6 +92,8 @@ churning out lines of boilerplate getopt(3) code.
 | ---------------------	| ---	| -----	| -----	| ------- |
 | *amd64 Linux/GNU*	|14.2.1	|18.1.8	| 0.9.27| f66a661 |
 | *amd64 Linux/musl*	|14.2.1	|18.1.8	|	|         |
+| *aarch64 Linux/GNU*	|13.2.0	|17.0.6	|	|         |
+| *aarch64 Linux/musl*	|13.2.0	|17.0.6	|	|         |
 
 NB: For musl-based binaries, tests/test.sh was run with
 `erange_str='Result not representable'` in its environment
@@ -86,12 +113,10 @@ NB: For musl-based binaries, tests/test.sh was run with
   [popt]\(3) instead
 - getopt_long_only(3)-style single dash parsing
 
-[popt]: https://github.com/rpm-software-management/popt
-
 
 ## Example ##
 
-See [tests/test-bin.c](tests/test-bin.c).
+See [tests/](tests/) and [examples/](examples/).
 
 ## Copyright ##
 
