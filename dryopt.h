@@ -7,6 +7,12 @@
 #include <stddef.h>	/* wchar_t, size_t */
 #include <stdio.h>	/* FILE* */
 
+struct dryopt;
+
+/* Return number of characters consumed successfully from arg. 0 means arg
+   was invalid */
+typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
+
 struct dryopt {
 	/* Each of these can be 0 to indicate it should not be (eg.
 	   .shortopt = L'\0' means no shortopt, .longopt = NULL means no
@@ -35,7 +41,11 @@ struct dryopt {
 	   .assign_val (8, 010) */
 	unsigned sizeof_arg: 4;
 
-	void * argptr;	/* type pointed to depends on .type */
+	union {
+		void * argptr; /* type pointed to depends on .type */
+		dryopt_callback callback;
+	};
+
 	/* If .type == CALLBACK, dryopt ignores this union, so the caller
 	   can use it to pass arbitrary data to the callback */
 	union {
@@ -56,10 +66,6 @@ struct dryopt {
 		char const *const * enum_args;
 	};
 };
-
-/* Return number of characters consumed successfully from arg. 0 means arg
-   was invalid */
-typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 
 #define DRYARG(ARGPTR)	\
 	.type = _Generic((ARGPTR),			\
@@ -82,7 +88,8 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 			char**: 0,			\
 			dryopt_callback: 0,		\
 			default: sizeof *(ARGPTR)),	\
-	.argptr = (ARGPTR)
+	.argptr = (ARGPTR)	/* frustratingly, I can't get _Generic to
+				   pick .callback here */
 
 /* BEWARE! <ARGPTR> may be evaluated multiple times!
    Also, this one depends on C11 _Generic. If you lack that, you'll have to

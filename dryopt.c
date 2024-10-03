@@ -4,8 +4,8 @@
 /*
 C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
-		restrict'd pointers, on the other hand, are not always. Some
-		mixing of code and declarations
+		restrict'd pointers, on the other hand, are not always. Little
+		bit of designated initialisers
 	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX), anonymous union (widely available and
@@ -24,9 +24,9 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>	/* exit(3), mbtowc(3), strto{ull,ll,ld}(3), abort(3); planned: bsearch(3), qsort(3) */
+#include <stdlib.h>	/* exit(3), strtou?ll(3), abort(3); planned: bsearch(3), qsort(3) */
 #include <string.h>
-#include <wchar.h>	/* wcrtomb(3) */
+#include <wchar.h>	/* mbrtowc(3), wcrtomb(3) */
 
 // global defaults
 char const	*restrict prognam = NULL,
@@ -115,12 +115,28 @@ print_row_printf_helper(FILE * out, char const * fmt, ...)
 	return ret;
 }
 
+static bool __attribute__((pure))
+opt_could_be_boolean(struct dryopt const *const opt)
+{
+	return opt->type == UNSIGNED && opt->takes_arg == NO_ARG;
+}
+
+static bool __attribute__((pure))
+opt_is_boolean(struct dryopt const *const opt)
+// derived from negate_boolean_opt() below
+{
+	return opt_could_be_boolean(opt)
+		&& ((!opt->set_arg && opt->assign_val.u == 1)
+		    || opt->set_arg == DRYARG_OR);
+}
+
 static int __attribute__((nonnull(1)))
 print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const out)
 {
-	wchar_t shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
+	wchar_t const shortopt_buf[3] = { L'-' * !!opt->shortopt, opt->shortopt, L'\0' };
 //	int const unseen_bytes = wcstombs(NULL, shortopt_buf, 0) - wcslen(shortopt_buf);
-	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, NULL) - 1 : 0;
+	mbstate_t ps = {0};
+	int const unseen_bytes = opt->shortopt ? wcrtomb(NULL, opt->shortopt, &ps) - 1 : 0;
 	char const argsep[2] = {
 		opt->takes_arg && opt->longopt
 		? '='
@@ -133,7 +149,7 @@ print_help_entry(struct dryopt const *restrict const opt, FILE *restrict const o
 		"  %ls%s%s%s%s%s",
 		shortopt_buf,
 		opt->shortopt && opt->longopt ? ", " : "",
-		opt->longopt ? "--" : "",
+		opt->longopt ? opt_is_boolean(opt) ? "--[no-]" : "--" : "",
 		opt->longopt ? opt->longopt : "",
 		argsep,
 		opt->takes_arg == OPT_ARG ? "[" : ""
@@ -288,7 +304,7 @@ init_bigendian(void)
 static void
 copy_word(void *restrict dest, size_t const destz, void const *restrict src, size_t srcz)
 {
-	memcpy(dest, bigendian ? src + srcz - destz : src, destz);
+	memcpy(dest, bigendian ? (char const*)src + srcz - destz : src, destz);
 }
 
 static union dryoptarg
@@ -414,7 +430,10 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 			default:
 				abort();
 			}
-			if (errno) {
+			switch (errno) {
+			case 0: case EINVAL:
+				break;
+			default:
 				ERR("%s: %s", optstr, strerror(errno));
 				return optstr;
 			}
@@ -428,7 +447,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		}
 	case CALLBACK:
 		{
-			size_t const consumed = ((dryopt_callback)opt->argptr)(opt, optstr);
+			size_t const consumed = opt->callback(opt, optstr);
 			arg_found = !!consumed, optstr += consumed;
 			break;
 		}
@@ -449,12 +468,6 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 	}
 
 	return arg_found ? optstr : NULL;
-}
-
-static bool
-opt_could_be_boolean(struct dryopt const *const opt)
-{
-	return opt->type == UNSIGNED && opt->takes_arg == NO_ARG;
 }
 
 static bool
@@ -494,8 +507,58 @@ negated_boolean_longopt(char const neg_long_opt[], struct dryopt const *const op
 		&& negate_boolean_opt(opt);
 }
 
-#define ARGNFOUND(optfmt, opt)	\
-		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt)
+static struct optarg_handled {
+	/* TODO: how about a system of unsigned x, y; denoting argv[x][y],
+	   where we end up? eg.
+		struct optarg_handled { size_t x: 1, y: SIZE_WIDTH - 1; } */
+	char *restrict new_arg;
+	unsigned argi: 1;
+} handle_optarg (
+	struct dryopt const *restrict const opt,
+	char *restrict const arg, char *const rest_argv[]
+) {
+	struct optarg_handled ret = {0};
+	union dryoptarg parsed;
+	assert(opt->takes_arg != NO_ARG);
+
+	if (arg)
+		ret.new_arg = parse_optarg(opt, arg, &parsed);
+	else if (opt->takes_arg == OPT_ARG) {
+		// peek at next arg
+		if (is_strictly_defined(opt->type)
+			&& (rest_argv[ret.argi] || opt->type == CALLBACK))
+		{
+			ret.new_arg = parse_optarg(opt, rest_argv[ret.argi], &parsed);
+			if (ret.new_arg) {
+				if (!*ret.new_arg)
+					ret.argi++;
+				else
+					ret.new_arg = NULL; // it never happened
+			}
+		}
+	} else if ((ret.new_arg = rest_argv[ret.argi++]))
+		ret.new_arg = parse_optarg(opt, ret.new_arg, &parsed);
+	else
+		return ret;
+
+	if (ret.new_arg) {
+		write_optarg(opt, parsed);
+	} else if (opt->takes_arg == OPT_ARG)
+		write_optarg(opt, opt->assign_val);
+	// else nothing
+
+	return ret;
+}
+
+#define CHECK_ARGNFOUND(optfmt, opt)				\
+	do if (!oh.new_arg && opts[opti].takes_arg == REQ_ARG)	\
+		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt);	\
+	while (0)
+#define CHECK_TRAILING_JUNK(optfmt, opt, og_arg)	\
+	do if (oh.new_arg && *oh.new_arg)		\
+		ERR("trailing junk after %td bytes of argument to "optfmt": %s",	\
+			oh.new_arg - (og_arg), opt, (og_arg));	\
+	while (0)
 
 // Returns n of arguments consumed from argv
 static size_t
@@ -551,45 +614,15 @@ found:	if (opts[opti].type == ENUM_ARG)
 			// TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
 		else if (opts[opti].type == CALLBACK)
-			((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+			opts[opti].callback(opts + opti, NULL);
 		else
 			write_optarg(opts + opti, opts[opti].assign_val);
 	else {
-		char * og_long_arg = long_arg;
-		union dryoptarg parsed;
-
-		/* TODO: redundancy between this and the equivalent code in
-		   parse_shortopts(); move out and merge into a function */
-		if (long_arg)
-thru:			long_arg = parse_optarg(opts + opti, long_arg, &parsed);
-		else {
-			if (opts[opti].takes_arg == OPT_ARG) {
-				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
-					long_arg = parse_optarg(opts + opti, argv[argi], &parsed);
-					if (long_arg && !*long_arg)
-						og_long_arg = argv[argi++];
-					else
-						long_arg = og_long_arg; // is this necessary?
-				}
-			} else if ((long_arg = argv[argi++]))
-				goto thru;
-			else
-				goto arg_not_found;
-		}
-
-		if (long_arg) {
-			write_optarg(opts + opti, parsed);
-			if (*long_arg)
-				ERR("trailing junk after %tu bytes of argument to --%s: %s",
-					og_long_arg - long_arg, longopt, og_long_arg);
-					// TODO: shouldn't this return?
-		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
-		else {
-arg_not_found:		ARGNFOUND("--%s", longopt);
-			return argi;
-		}
+		struct optarg_handled const oh =
+			handle_optarg(opts + opti, long_arg, argv + argi);
+		CHECK_ARGNFOUND("--%s", longopt);
+		argi += oh.argi;
+		CHECK_TRAILING_JUNK("--%s", longopt, long_arg);
 	}
 
 	return argi;
@@ -601,13 +634,15 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 {
 	size_t argi = 0, opti;
 	char * optstr = argv[argi++];
+	mbstate_t ps = {0};
+
 	if (*optstr == '-')
 		optstr++;
 
 	for (;;) {
 		wchar_t wc;
 		{
-			int conv_ret = mbtowc(&wc, optstr, MB_CUR_MAX);
+			int conv_ret = mbrtowc(&wc, optstr, MB_CUR_MAX, &ps);
 			if (conv_ret <= 0) {
 				if (conv_ret < 0)
 					ERR("%s: byte %tu of `%s'",
@@ -631,68 +666,26 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 			continue;
 		}
 
-found:		union dryoptarg parsed;
-		char * new_optstr = NULL;
-
 		// Now we go back to multibyte processing
-		if (opts[opti].type == ENUM_ARG)
+found:		if (opts[opti].type == ENUM_ARG)
 			opts[opti].takes_arg = REQ_ARG;
 
-		if (opts[opti].takes_arg == NO_ARG) {
+		if (opts[opti].takes_arg == NO_ARG)
 			if (opts[opti].type == CALLBACK)
-				((dryopt_callback)opts[opti].argptr)(opts + opti, NULL);
+				opts[opti].callback(opts + opti, NULL);
 			else
 				write_optarg(opts + opti, opts[opti].assign_val);
-			continue;
-		}
-
-		/* An earlier version of this used gotos to skip extraneous
-		   tests (like setting new_optstr to NULL, then immediately
-		   zero-testing it). Those branches were probably less
-		   performant than referring to the same register or even
-		   flags twice; a compiler could even optimise some cases
-		   out. Moreover, this version is less unreadable
-		        ^ That was premature. This is not pretty. TODO: function */
-		if (!*optstr)
-			if (opts[opti].takes_arg == OPT_ARG) {
-				// peek at next arg (argi was already incremented)
-				if (is_strictly_defined(opts[opti].type) && (argv[argi] || opts[opti].type == CALLBACK)) {
-					new_optstr = parse_optarg(opts + opti, argv[argi], &parsed);
-					/* if the whole of the next arg was
-					   successfully consumed, make the peekahead
-					   increment official and permanent, but don't
-					   set optstr or this will loop onto next arg */
-					if (new_optstr) {
-						if (!*new_optstr)
-							argi++;
-						else
-							new_optstr = NULL; // it never happened
-					}
-				}
-			} else if ((optstr = argv[argi++]))
-				goto thru;
-			else
-				goto arg_not_found;
 		else {
-thru:			new_optstr = parse_optarg(opts + opti, optstr, &parsed);
-			/* argi wasn't advanced, new_optstr is just part of
-			   optstr, so advance optstr */
-			if (new_optstr)
-				optstr = new_optstr;
-		}
-
-		if (new_optstr) {
-			write_optarg(opts + opti, parsed);
-			if (argi > 1 && optstr && *optstr) {
-				ERR("trailing junk after %td bytes of argument to -%lc: %s",
-					optstr - argv[argi - 1], wc, argv[argi - 1]);
+			struct optarg_handled const oh =
+				handle_optarg(opts + opti, *optstr ? optstr : NULL, argv + argi);
+			CHECK_ARGNFOUND("-%lc", wc);
+			argi += oh.argi;
+			if (oh.argi) {
+				CHECK_TRAILING_JUNK("-%lc", wc, argv[argi - 1]);
 				return argi;
 			}
-		} else if (opts[opti].takes_arg == OPT_ARG)
-			memset(opts[opti].argptr, 0, opts[opti].sizeof_arg);
-		else {
-arg_not_found:		ARGNFOUND("-%lc", wc);
-			return argi;
+			if (oh.new_arg)
+				optstr = oh.new_arg;
 		}
 	}
 }
