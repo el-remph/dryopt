@@ -7,6 +7,12 @@
 #include <stddef.h>	/* wchar_t, size_t */
 #include <stdio.h>	/* FILE* */
 
+struct dryopt;
+
+/* Return number of characters consumed successfully from arg. 0 means arg
+   was invalid */
+typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
+
 struct dryopt {
 	/* Each of these can be 0 to indicate it should not be (eg.
 	   .shortopt = L'\0' means no shortopt, .longopt = NULL means no
@@ -35,7 +41,11 @@ struct dryopt {
 	   .assign_val (8, 010) */
 	unsigned sizeof_arg: 4;
 
-	void * argptr;	/* type pointed to depends on .type */
+	union {
+		void * argptr; /* type pointed to depends on .type */
+		dryopt_callback callback;
+	};
+
 	/* If .type == CALLBACK, dryopt ignores this union, so the caller
 	   can use it to pass arbitrary data to the callback */
 	union {
@@ -56,10 +66,6 @@ struct dryopt {
 		char const *const * enum_args;
 	};
 };
-
-/* Return number of characters consumed successfully from arg. 0 means arg
-   was invalid */
-typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 
 #define DRYARG(ARGPTR)	\
 	.type = _Generic((ARGPTR),			\
@@ -82,7 +88,8 @@ typedef size_t (*dryopt_callback)(struct dryopt const*, char const * arg);
 			char**: 0,			\
 			dryopt_callback: 0,		\
 			default: sizeof *(ARGPTR)),	\
-	.argptr = (ARGPTR)
+	.argptr = (ARGPTR)	/* frustratingly, I can't get _Generic to
+				   pick .callback here */
 
 /* BEWARE! <ARGPTR> may be evaluated multiple times!
    Also, this one depends on C11 _Generic. If you lack that, you'll have to
@@ -100,9 +107,7 @@ extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_write, 2, 3), nonnull));
 
 /* Note: this returns! */
-extern void auto_help(	struct dryopt opts[], size_t optn,
-			FILE *restrict outfile, char const *restrict program_name,
-			char const *restrict help_args, char const *restrict help_extra)
+extern void auto_help(struct dryopt opts[], size_t optn, FILE *restrict outfile)
 	__attribute__((cold, leaf));
 
 extern struct dryopt_config_s {
@@ -124,6 +129,11 @@ extern struct dryopt_config_s {
 	   enough */
 	unsigned wrap: 10;
 } dryopt_config;
+
+/* These affect the output of auto_help(); prognam also affects diagnostics
+   printed by DRYopt unless dryopt.autodie == noop. They are zero-initialised,
+   although dryopt_parse() sets prognam */
+extern char const *restrict prognam, *restrict DRYopt_help_args, *restrict DRYopt_help_extra;
 
 /* WARNING! <OPTS> may be evaluated twice! */
 #define DRYOPT_PARSE(ARGV, OPTS) dryopt_parse((ARGV), (OPTS), sizeof(OPTS) / sizeof(struct dryopt))

@@ -45,13 +45,13 @@ arguments after options:	-bar	foo	mung'	\
 
 export LANG=C
 if type errno >/dev/null 2>&1; then
-	erange_str=`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`
-	einval_str=`errno EINVAL | sed -E 's/^EINVAL [0-9]+ //'`
-#	erange_str=${erange_str#'ERANGE 34 '}
+	erange_str=${erange_str:-`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`}
+	einval_str=${einval_str:-`errno EINVAL | sed -E 's/^EINVAL [0-9]+ //'`}
 else
-	erange_str='Numerical result out of range'
-	einval_str='Invalid argument'
+	erange_str=${erange_str:-'Numerical result out of range'}
+	erange_str=${einval_str:-'Invalid argument'}
 fi
+
 
 # overflow tests
 for i in 32768 -32769; do
@@ -62,12 +62,13 @@ help_output="\
 Usage: ./tests/test-bin [OPTS] [ARGS]
   -v, --value=SIGNED             set value
   -b, --bigvalue=[UNSIGNED]      set bigvalue
-  -c, --callback=[ARG]           call callback
   -s, --strarg=[STR]             set strarg
-  -n, --flag                     boolean; takes no argument
+  -n, --[no-]flag                boolean; takes no argument
   -F, --float=FLOATING           set fl (double)
   -e, --enum=never,auto,always   pick one of a predetermined set of arguments
-  --inval                        crash the program"
+  -c, --callback=[ARG]           call callback
+  --inval=(null)                 crash the program
+  -h, -?, --help                 Print this help and exit"
 do_test "$help_output" -h
 do_test "$help_output" '-?'
 do_test "$help_output" --help
@@ -114,3 +115,14 @@ arguments after options:' $i
 done
 
 fail_test "$exe: DRYopt error: $einval_str" --inval
+
+# Preserve `-' as a positional argument
+do_test '-v 0	-b 1	-s (null)	-n 0	-F 0
+arguments after options:	-'	\
+	-
+do_test '-v 0	-b 1	-s (null)	-n 1	-F 0
+arguments after options:	-'	\
+	-n -
+do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
+arguments after options:	-'	\
+	-b -
