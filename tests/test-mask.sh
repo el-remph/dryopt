@@ -1,6 +1,6 @@
 #!/bin/sh
 set -efmu
-exe=./$1
+exe=./$1 sepstr=/////
 
 do_test() {
 	expectation=$1
@@ -28,10 +28,24 @@ test_range() {
 
 		do_test $i $@
 
+		if test -n "${BASH_VERSION+}"; then
+			set -- "${@/#--/--no-}"
+		else
+			# Negate options, by splitting the stack into two separate
+			# stacks with $sepstr, then popping off the top one and
+			# pushing to the bottom one until $sepstr
+			set -- "$@" "$sepstr"
+			while test "$sepstr" != "$1"; do
+				set -- "$@" "--no-${1#--}"
+				shift
+			done
+			shift # lose $sepstr
+		fi
+
 		# I can explain -- 15 is 0b1111, which is (_BitInt(4))-1, so XORing
 		# it with $i flips the mask, just like setting every option and then
 		# unsetting those corresponding to $i
-		do_test $((i ^ 15)) --foo --bar --mung --snark ${@/#--/--no-}	# FIXME: that last substitution wants bash
+		do_test $((i ^ 15)) --foo --bar --mung --snark $@
 	done
 }
 
