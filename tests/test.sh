@@ -1,18 +1,37 @@
 #!/bin/sh
+# Dependencies: usually just builtins (echo(1p), printf(1p), test(1p)) and
+# uname(1) with -o. Under MSYS, additionally: realpath(1p), dirname(1p),
+# sed(1p), unix2dos(1)
+
 set -efu +m
 exe=./$1
+
+case `uname -s` in
+MINGW*|Windows*)
+	is_msw=1
+	exename=$(realpath "$exe" | $(dirname "$0")/path-msys-to-windows.sed)
+	;;
+*)
+	is_msw= exename=$exe
+esac
 
 do_test() {
 	expectation=$1
 	shift
-	echo >&2 "+> $exe $*"
+	echo "+> $exe $*"
 	if reality=`$exe "$@"`; then :; else # preserve $? without triggering errexit
 		code=$?
-		echo >&2 "$exe $*: exit $code"
+		echo "$exe $*: exit $code"
 		return $code
 	fi
+
+	# Not pretty, but the only portable way without -o pipefail
+	if test -n $is_msw; then
+		reality=`echo "$reality" | dos2unix`
+	fi
+
 	if test "$expectation" != "$reality"; then
-		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+		printf '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
 			"$exe $*" "$expectation" "$reality"
 		return 1
 	fi
@@ -22,13 +41,13 @@ do_test() {
 fail_test() {
 	expectation=$1
 	shift
-	echo >&2 "+> $exe $*"
+	echo "+> $exe $*"
 	if reality=`$exe "$@" 2>&1 >/dev/null`; then
-		echo >&2 "$exe $*: false success"
+		echo "$exe $*: false success"
 		return 1
 	fi
 	if test "$expectation" != "$reality"; then
-		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+		printf '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
 			"$exe $*" "$expectation" "$reality"
 		return 1
 	fi
@@ -55,11 +74,11 @@ fi
 
 # overflow tests
 for i in 32768 -32769; do
-	fail_test "$exe: $i: $erange_str" --value:$i
+	fail_test "$exename: $i: $erange_str" --value:$i
 done
 
 help_output="\
-Usage: ./tests/test-bin [OPTS] [ARGS]
+Usage: $exename [OPTS] [ARGS]
   -v, --value=SIGNED             set value
   -b, --bigvalue=[UNSIGNED]      set bigvalue
   -s, --strarg=[STR]             set strarg
@@ -101,7 +120,7 @@ done
 
 # Don't segfault if the argument is mandatory either; try to fail with grace
 for i in -F --float --float=; do
-	fail_test "$exe: missing FLOATING argument to ${i%=}" $i
+	fail_test "$exename: missing FLOATING argument to ${i%=}" $i
 done
 
 for i in -c --callback; do
