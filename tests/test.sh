@@ -1,15 +1,14 @@
 #!/bin/sh
-# Dependencies: usually just builtins (echo(1p), printf(1p), test(1p)) and
-# uname(1) with -o. Under MSYS, additionally: realpath(1p), dirname(1p),
-# sed(1p), unix2dos(1)
+# Dependencies (all POSIX): usually just builtins (echo, printf, test) and
+# uname. Under MSYS, additionally: realpath, dirname, sed
 
 set -efu +m
 exe=./$1
 
 case `uname -s` in
-MINGW*|Windows*)
+MINGW*|MSYS*|Windows*)
 	is_msw=1
-	exename=$(realpath "$exe" | $(dirname "$0")/path-msys-to-windows.sed)
+	exename=$(realpath "$exe" | $(dirname "$0")/util/argv0-msys-to-windows.sed)
 	;;
 *)
 	is_msw= exename=$exe
@@ -27,7 +26,7 @@ do_test() {
 
 	# Not pretty, but the only portable way without -o pipefail
 	if test -n $is_msw; then
-		reality=`echo "$reality" | dos2unix`
+		reality=`echo "$reality" | sed 's/\r$//'` # dos2unix(1) not always available
 	fi
 
 	if test "$expectation" != "$reality"; then
@@ -67,6 +66,8 @@ if test -z "${erange_str-}"; then
 	if type errno >/dev/null 2>&1; then
 		erange_str=`errno ERANGE | sed -E 's/^ERANGE [0-9]+ //'`
 #		erange_str=${erange_str#'ERANGE 34 '}
+	elif test -n $is_msw; then
+		erange_str='Result too large'
 	else
 		erange_str='Numerical result out of range'
 	fi

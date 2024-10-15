@@ -101,8 +101,7 @@ documentation.
 [^musl]:	For musl-based binaries, tests/test.sh was run with
 		`erange_str='Result not representable'` in its environment
 [^msw]:	For M$ Windows, GCC was the mingw64 version, and tests/test.sh
-	was run using MSYS2 bash and utils, and with
-	`erange_str='Result too large'` in its environment
+	was run using MSYS2 bash and utils
 
 ## Missing features (may or may not be implemented later) ##
 
