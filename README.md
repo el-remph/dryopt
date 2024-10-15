@@ -88,18 +88,22 @@ documentation.
 
 ### Tested on: ###
 
-|			| GCC	| Clang	| [TCC]	| [cproc] |
-| ---------------------	| ---	| -----	| -----	| ------- |
-| *amd64 Linux/GNU*	|14.2.1	|18.1.8	| 0.9.27| f66a661 |
-| *amd64 Linux/musl*	|14.2.1	|18.1.8	|	|         |
-| *aarch64 Linux/GNU*	|13.2.0	|17.0.6	|	|         |
-| *aarch64 Linux/musl*	|13.2.0	|17.0.6	|	|         |
-
-NB: For musl-based binaries, tests/test.sh was run with
-`erange_str='Result not representable'` in its environment
+|				| GCC	| Clang	| [TCC]	| [cproc] |
+| ---------------------------	| ---	| -----	| -----	| ------- |
+| *amd64 Linux/GNU*		|14.2.1	|18.1.8	| 0.9.27| f66a661 |
+| *amd64 Linux/musl[^musl]*	|14.2.1	|18.1.8	|	|         |
+| *aarch64 Linux/GNU*		|13.2.0	|17.0.6	|	|         |
+| *aarch64 Linux/musl[^musl]*	|13.2.0	|17.0.6	|	|         |
+| *amd64 Windows[^msw]*		|14.2.0 |	|	|         |
 
 [TCC]: https://bellard.org/tcc/
 [cproc]: https://git.sr.ht/~mcf/cproc
+[^musl]:	For musl-based binaries, tests/test.sh was run with
+		`erange_str='Result not representable'` in its environment
+[^msw]:	For M$ Windows, GCC was the mingw64 version, and tests/test.sh
+	was run using MSYS2 bash and utils, sometimes with
+	`erange_str='Result too large'` in its environment, depending on the
+        exact toolchain used
 
 ## Missing features (may or may not be implemented later) ##
 

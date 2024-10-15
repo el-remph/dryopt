@@ -1,18 +1,41 @@
 #!/bin/sh
+# Dependencies (all POSIX): usually just builtins (echo, printf, test) and
+# uname. Under MSYS, additionally: basename, sed
+
 set -efu +m
 exe=./$1
+exename=`basename "$exe"`
+
+case `uname -s` in
+MINGW*|MSYS*|Windows*)
+	is_msw=1
+	;;
+*)
+	is_msw=
+	;;
+esac
+
+set_reality_or_die() {
+	if reality=`$exe "$@"`; then :; else # preserve $? without triggering errexit
+		code=$?
+		echo "$exe $*: exit $code"
+		return $code
+	fi
+
+	# Not pretty, but the only portable way without -o pipefail
+	if test -n $is_msw; then
+		reality=`echo "$reality" | sed 's/\r$//'` # dos2unix(1) not always available
+	fi
+}
+
 
 do_test() {
 	expectation=$1
 	shift
-	echo >&2 "+> $exe $*"
-	if reality=`$exe "$@"`; then :; else # preserve $? without triggering errexit
-		code=$?
-		echo >&2 "$exe $*: exit $code"
-		return $code
-	fi
+	echo "+> $exe $*"
+	set_reality_or_die "$@"
 	if test "$expectation" != "$reality"; then
-		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+		printf '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
 			"$exe $*" "$expectation" "$reality"
 		return 1
 	fi
@@ -22,16 +45,40 @@ do_test() {
 fail_test() {
 	expectation=$1
 	shift
-	echo >&2 "+> $exe $*"
+	echo "+> $exe $*"
 	if reality=`$exe "$@" 2>&1 >/dev/null`; then
-		echo >&2 "$exe $*: false success"
+		echo "$exe $*: false success"
 		return 1
 	fi
-	if test "$expectation" != "$reality"; then
-		printf >&2 '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
-			"$exe $*" "$expectation" "$reality"
+	case $reality in
+	*[[:punct:]]$exename*": $expectation") ;;
+	*)
+		printf '>>> %s:\n>>> expected:\n%s\n>>> got:\n%s\n' \
+			"$exe $*" "*/$exename*: $expectation" "$reality"
 		return 1
-	fi
+	esac
+	return 0
+}
+
+test_help() {
+	set_reality_or_die "$@"
+	case $reality in
+	"\
+Usage: "*[[:punct:]]$exename*' [OPTS] [ARGS]
+  -v, --value=SIGNED             set value
+  -b, --bigvalue=[UNSIGNED]      set bigvalue
+  -s, --strarg=[STR]             set strarg
+  -n, --[no-]flag                boolean; takes no argument
+  -F, --float=FLOATING           set fl (double)
+  -e, --enum=never,auto,always   pick one of a predetermined set of arguments
+  -c, --callback=[ARG]           call callback
+  -h, -?, --help                 Print this help and exit')
+		;;
+	*)
+		printf '>>> %s:\n>>> bad help message:\n%s\n' \
+			"$exe $*" "$reality"
+		return 1
+	esac
 	return 0
 }
 
@@ -55,22 +102,12 @@ fi
 
 # overflow tests
 for i in 32768 -32769; do
-	fail_test "$exe: $i: $erange_str" --value:$i
+	fail_test "$i: $erange_str" --value:$i
 done
 
-help_output="\
-Usage: ./tests/test-bin [OPTS] [ARGS]
-  -v, --value=SIGNED             set value
-  -b, --bigvalue=[UNSIGNED]      set bigvalue
-  -s, --strarg=[STR]             set strarg
-  -n, --[no-]flag                boolean; takes no argument
-  -F, --float=FLOATING           set fl (double)
-  -e, --enum=never,auto,always   pick one of a predetermined set of arguments
-  -c, --callback=[ARG]           call callback
-  -h, -?, --help                 Print this help and exit"
-do_test "$help_output" -h
-do_test "$help_output" '-?'
-do_test "$help_output" --help
+test_help -h
+test_help '-?'
+test_help --help
 
 # Distinguishing optional arguments
 for i in '-b -n' '--bigvalue --flag'; do
@@ -101,7 +138,7 @@ done
 
 # Don't segfault if the argument is mandatory either; try to fail with grace
 for i in -F --float --float=; do
-	fail_test "$exe: missing FLOATING argument to ${i%=}" $i
+	fail_test "missing FLOATING argument to ${i%=}" $i
 done
 
 for i in -c --callback; do

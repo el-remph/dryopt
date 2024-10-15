@@ -6,7 +6,7 @@ C version state (inexhaustive and unordered):
 C99:	lang:	__VA_ARGS__ and long long are both widely available anyway;
 		restrict'd pointers, on the other hand, are not always. Little
 		bit of designated initialisers
-	libc:	<stdbool.h>, isfinite(3), printf(3) "%tu", vsnprintf(3)
+	libc:	<stdbool.h>, isfinite(3), vsnprintf(3)
 GNU C:	variadic macro fallback, enum bitfields (widely available and
 	definitely a WONTFIX), anonymous union (widely available and
 	probably a WONTFIX)
@@ -543,8 +543,8 @@ static struct optarg_handled {
 	while (0)
 #define CHECK_TRAILING_JUNK(optfmt, opt, og_arg)	\
 	do if (oh.new_arg && *oh.new_arg)		\
-		ERR("trailing junk after %td bytes of argument to "optfmt": %s",	\
-			oh.new_arg - (og_arg), opt, (og_arg));	\
+		ERR("trailing junk after %lu bytes of argument to "optfmt": %s",	\
+			(long unsigned)(oh.new_arg - (og_arg)), opt, (og_arg));	\
 	while (0)
 
 // Returns n of arguments consumed from argv
@@ -631,8 +631,8 @@ parse_shortopts(char *const argv[], struct dryopt opts[], size_t const optn)
 		int conv_ret = mbrtowc(&wc, optstr, MB_CUR_MAX, &ps);
 		if (conv_ret <= 0) {
 			if (conv_ret < 0)
-				ERR("%s: byte %tu of `%s'",
-					strerror(errno), optstr - *argv, *argv);
+				ERR("%s: byte %lu of `%s'",
+					strerror(errno), (long unsigned)(optstr - *argv), *argv);
 			return argi;
 		}
 		optstr += conv_ret;
