@@ -11,10 +11,21 @@ churning out lines of boilerplate getopt(3) code.
   from this can be implemented through [argp]-style callbacks
 - [Automatic `--help` generation](#automatic---help-generation)
 - Cool [type system](#type-system)
+- [Automatic config file parsing](#automatic-config-file-parsing)
 - wchar_t options allowed (UTF-32 on sane systems, equivalent on FreeBSD and
   Solaris, UCS-2 on W*ndows); respects locale
-- No heap allocation, and not too intrusive with the globals
+- No heap allocation (except for specific, optional scenarios[^mem]), and
+  not too intrusive with the globals
 - Single-{source,header,object}
+
+[^mem]:	stdio (which may allocate to the heap) is used in `--help` generation
+	and config file parsing, both of which have to be explicitly invoked.
+	Config file parsing also copies to the heap any arguments passed to
+	`STRING` options. If it matters to you, then you'll need to free
+	those strings; see `main()` in [tests/test-bin.c] for a simple way to
+	test if such a string should be freed or not.
+
+[tests/test-bin.c]: tests/test-bin.c
 
 ### Automatic `--help` generation ###
 
@@ -76,6 +87,46 @@ documentation.
   like `--colour={auto,always,never}`
 
 [Perl's Getopt::Long]: https://metacpan.org/dist/Getopt-Long
+
+### Automatic config file parsing ###
+
+If you have options that could be set either on the command line or in
+a configuration file, a natural approach is to use the same mechanism
+for both, with minor changes to syntax; for example, see [mpv(1)] or
+[swaylock(1)]. DRYopt automates this through the `dryopt_config_file()`
+function, which follows a `struct dryopt[]` parameter the same as the rest
+of the library, but processes options from a `FILE*` stream rather than a
+string vector. See `process_conf_file()` in [tests/test-bin.c] for a
+convenient callback for parsing a configuration file given as a command-line
+option.
+
+[mpv(1)]: https://mpv.io/manual/master/#configuration-files
+	"mpv(1) section CONFIGURATION FILES"
+[swaylock(1)]: https://github.com/swaywm/swaylock/blob/master/swaylock.1.scd#options
+	"swaylock(1) section OPTIONS"
+
+#### Config file syntax ####
+
+Configuration files consist of long option names, without any leading
+dashes, one per line. Arguments are separated by either `=` or `:`.
+
+Leading whitespace in a line is ignored; currently, trailing whitespace
+after the option name is significant, so separators should have no space
+around them, and likewise everything after the separator character,
+including whitespace, is passed as an argument. However, the standard C
+numeric string conversion functions do ignore leading whitespace in their
+argument, so lines such as `foo: 123` work.
+
+Lines beginning with `#` or `;` (after leading whitespace is trimmed) are
+comments. Comments **cannot** be begun at any arbitrary point in the middle
+of a line, so comment characters are allowed in arguments and even options;
+however, after an argument is parsed by its option-specific parser (eg. a
+numeric string that only consumes `\d*`), if the string left over is a
+comment (`\s*[#;].*`), then that will be ignored.
+
+The whitespace behaviour described above is a touch janky and may yet change.
+
+See [tests/test.conf](tests/test.conf) for an example.
 
 
 ## Requirements (minimal) ##

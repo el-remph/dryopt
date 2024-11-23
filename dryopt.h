@@ -103,9 +103,13 @@ struct dryopt {
 extern size_t dryopt_parse(char *const[], struct dryopt[], size_t)
 	__attribute__((__access__(read_write, 2, 3), nonnull));
 
-/* Note: this returns! */
-extern void auto_help(struct dryopt opts[], size_t optn, FILE *restrict outfile)
-	__attribute__((cold, leaf));
+extern void
+	auto_help(struct dryopt opts[], size_t optn, FILE *restrict outfile)
+		__attribute__((cold, leaf)), /* Note: this returns! */
+	dryopt_config_file (
+		FILE *const conf, char const *restrict const filename,
+		struct dryopt opts[], size_t const optn
+	) __attribute__((leaf));
 
 extern struct dryopt_config_s {
 	/* defaults are zeroes across the board */

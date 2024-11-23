@@ -12,6 +12,8 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 	probably a WONTFIX)
 */
 
+#define _POSIX_C_SOURCE 200809l // strdup(3), getline(3)
+
 #include "dryopt.h"
 
 #include <assert.h>
@@ -70,8 +72,10 @@ err_(const char *restrict const fmt, ...)
 
 #if __STDC_VERSION__ < 199900l && defined __GNUC__
 #  define ERR(fmt, args...) err_("%s: " fmt "\n", prognam, args)
+#  define CONF_ERR(fmt, args...) err_("%s: %s: line %llu: " fmt "\n", prognam, filename, line_i, args)
 #else
 #  define ERR(fmt, ...) err_("%s: " fmt "\n", prognam, __VA_ARGS__)
+#  define CONF_ERR(fmt, ...) err_("%s: %s: line %llu: " fmt "\n", prognam, filename, line_i, __VA_ARGS__)
 #endif
 
 #define ENUM_MAP_ENTRY(enum_val) [enum_val] = #enum_val
@@ -117,7 +121,7 @@ print_row_printf_helper(FILE * out, char const * fmt, ...)
 
 static bool __attribute__((pure))
 opt_is_boolean(struct dryopt const *const opt)
-// derived from negated_boolean_longopt() below
+// derived from negate_boolean_longopt() below
 {
 	return opt->type == UNSIGNED && !opt->takes_arg
 		&& ((!opt->set_arg && opt->assign_val.u == 1)
@@ -376,18 +380,24 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg arg)
 	}
 }
 
-static bool __attribute__((pure))
+static char *__attribute__((nonnull, pure, returns_nonnull))
+eat_space(char const * str)
+{
+	while (isspace((unsigned)*str))
+		str++;
+	return str; /* unavoidable -- see eg. strchr(3) */
+}
+
+static bool __attribute__((nonnull, pure))
 str_n_isnegative(char const * str)
 /* since strtoul(3) and friends don't report underflow on unsigned numbers,
    we must sadly retrace their steps in order to see if a negative number
    was inappropriately passed. Basically just /^\s*-/ */
 {
-	while (isspace(*str))
-		str++;
-	return *str == '-';
+	return *eat_space(str) == '-';
 }
 
-static char *
+static char *__attribute__((nonnull))
 parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		union dryoptarg *restrict const parsed)
 /* returns optstr after the argument was parsed, or NULL if no argument was
@@ -465,7 +475,7 @@ parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 }
 
 static bool
-negated_boolean_longopt(char const neg_long_opt[], struct dryopt const *const opt)
+negate_boolean_longopt(char const neg_long_opt[], struct dryopt const *const opt)
 {
 	if (!(opt->longopt
 	   && opt->type == UNSIGNED
@@ -537,9 +547,124 @@ static struct optarg_handled {
 	return ret;
 }
 
-#define CHECK_ARGNFOUND(optfmt, opt)				\
-	do if (!oh.new_arg && opts[opti].takes_arg == REQ_ARG)	\
-		ERR("missing %s argument to " optfmt, enum_type2str(opts[opti].type), opt);	\
+static struct found_longopt { size_t opti; char * arg; }
+find_longopt(char *const longopt, struct dryopt opts[], size_t const optn)
+// This is for code common to dryopt_config_file() and parse_longopt()
+{
+	struct found_longopt r = { 0, NULL }; // result; state
+
+	// find argument
+	r.arg = strpbrk(longopt, "=:");
+	if (r.arg)
+		*r.arg++ = '\0';
+
+	for (r.opti = 0; r.opti < optn; r.opti++)
+		if (opts[r.opti].longopt && strcmp(longopt, opts[r.opti].longopt) == 0)
+			goto found;
+
+	if (!r.arg && strncmp(longopt, "no", 2) == 0) {
+		/* Could be a negated boolean long option */
+		char * neg_long_opt = longopt + 2;
+		if (*neg_long_opt == '-')
+			neg_long_opt++;
+
+		for (r.opti = 0; r.opti < optn; r.opti++)
+			if (negate_boolean_longopt(neg_long_opt, opts + r.opti)) {
+				r.opti = -2;
+				return r;
+			}
+	}
+
+	// fall through: not found
+	r.opti = -1, r.arg = NULL;
+	return r;
+
+	// inaccessible except by goto label:
+found:	if (opts[r.opti].type == ENUM_ARG)
+		opts[r.opti].takes_arg = REQ_ARG;
+	return r;
+}
+
+static bool __attribute__((pure))
+is_conf_comment(char const c)
+{
+	switch (c) {
+	case '#': case ';': case 0:
+		return true;
+	default:
+		return false;
+	}
+}
+
+extern void
+dryopt_config_file (
+	FILE *restrict const conf, char const *restrict const filename, // used by CONF_ERR
+	struct dryopt opts[], size_t const optn
+) {
+	long long unsigned line_i = 1;
+	size_t getline_n = 0;
+	ssize_t len;
+	char * line = NULL;
+
+	/* This doesn't support embedded NUL bytes */
+	for (; (len = getline(&line, &getline_n, conf)) != -1; line_i++) {
+		// In perl: chomp
+		line[len - 1] = '\0';
+
+		// In sed: /^(\s*[;#]|$)/d. Or more accurately, s/^\s*//;/^[^;#]/!d
+		char *const longopt = eat_space(line);
+		if (is_conf_comment(*longopt))
+			continue;
+
+		struct found_longopt l = find_longopt(longopt, opts, optn);
+		if (l.opti == (size_t)-1 && l.arg == NULL) {
+			CONF_ERR("unrecognised option: %s", longopt);
+			continue;
+		}
+		if (l.opti == (size_t)-2)
+			continue; // already handled
+
+		if (!l.arg)
+			/* there is, ironically, some code repetition between here and
+			   parse_longopt() */
+			if (opts[l.opti].takes_arg == REQ_ARG)
+				CONF_ERR("missing %s argument to `%s'", enum_type2str(opts[l.opti].type), longopt);
+			else if (opts[l.opti].type == CALLBACK)
+				opts[l.opti].callback(opts + l.opti, NULL);
+			else
+				write_optarg(opts + l.opti, opts[l.opti].assign_val);
+		else
+			if (opts[l.opti].takes_arg == NO_ARG)
+				CONF_ERR("option `%s' does not take an argument", longopt);
+			else if (opts[l.opti].type == STR) {
+				/* Have to strdup(3), as if we lose the pointer to the
+				   beginning of the buffer, it can't be freed */
+				char * newstr = strdup(l.arg);
+				if (newstr)
+					*(void**)opts[l.opti].argptr = newstr;
+				else
+					CONF_ERR("%s", strerror(errno));
+			} else {
+				union dryoptarg parsed;
+				char * leftover = parse_optarg(opts + l.opti, l.arg, &parsed);
+				if (!leftover)
+					CONF_ERR("%s: %s", strerror(EINVAL), l.arg);
+				leftover = eat_space(leftover);
+				if (!is_conf_comment(*leftover))
+					CONF_ERR("byte %lu: trailing junk after argument to option `%s': %s",
+						leftover - line, longopt, leftover);
+				/* if err_() doesn't exit(3), then imitate parse_longopt()'s
+				   behaviour and just carry on */
+				write_optarg(opts + l.opti, parsed);
+			}
+	}
+
+	free(line);
+}
+
+#define CHECK_ARGNFOUND(entry, optfmt, opt)				\
+	do if (!oh.new_arg && (entry).takes_arg == REQ_ARG)	\
+		ERR("missing %s argument to " optfmt, enum_type2str((entry).type), opt);	\
 	while (0)
 #define CHECK_TRAILING_JUNK(optfmt, opt, og_arg)	\
 	do if (oh.new_arg && *oh.new_arg)		\
@@ -551,65 +676,40 @@ static struct optarg_handled {
 static size_t
 parse_longopt(char *const argv[], struct dryopt opts[], size_t const optn)
 {
-/*	if (dryopt_config.sorting) { //}
-		bsearch(longopt, opts, optn, sizeof *opts, */
-
-	size_t opti, argi = 0;
-	char	*restrict longopt = argv[argi++],
-		* long_arg = NULL;
+	size_t argi = 0;
+	char * longopt = argv[argi++];
 
 	if (*longopt == '-' && *++longopt == '-')
 		longopt++;
 
-	{
-		// find argument
-		char *const equals = strpbrk(longopt, "=:");
-		if (equals)
-			*equals = '\0',
-			long_arg = equals + 1;
+	struct found_longopt l = find_longopt(longopt, opts, optn);
+
+	if (l.opti == (size_t)-1 && l.arg == NULL) {
+		// Not found
+		if (strcmp(longopt, "help") == 0) {
+			auto_help(opts, optn, stdout);
+			exit(EXIT_SUCCESS);
+		}
+		ERR("unrecognised long option: %s", longopt);
+		return argi;
 	}
+	if (l.opti == (size_t)-2)
+		return argi;; // already handled
 
-	for (opti = 0; opti < optn; opti++)
-		if (opts[opti].longopt && strcmp(longopt, opts[opti].longopt) == 0)
-			goto found;
-
-	if (!long_arg && strncmp(longopt, "no", 2) == 0) {
-		/* Could be a negated boolean long option */
-		char * neg_long_opt = longopt + 2;
-		if (*neg_long_opt == '-')
-			neg_long_opt++;
-
-		for (opti = 0; opti < optn; opti++)
-			if (negated_boolean_longopt(neg_long_opt, opts + opti))
-				return argi;
-	}
-
-	// fallen through from above loop: not found
-	if (strcmp(longopt, "help") == 0) {
-		auto_help(opts, optn, stdout);
-		exit(EXIT_SUCCESS);
-	}
-	ERR("unrecognised long option: %s", longopt);
-	return argi;
-
-	// inaccessible except by goto label:
-found:	if (opts[opti].type == ENUM_ARG)
-		opts[opti].takes_arg = REQ_ARG;
-
-	if (opts[opti].takes_arg == NO_ARG)
-		if (long_arg)
+	if (opts[l.opti].takes_arg == NO_ARG)
+		if (l.arg)
 			// TODO: parse yes|no|true|false|[10] as an argument
 			ERR("option --%s does not take an argument", longopt);
-		else if (opts[opti].type == CALLBACK)
-			opts[opti].callback(opts + opti, NULL);
+		else if (opts[l.opti].type == CALLBACK)
+			opts[l.opti].callback(opts + l.opti, NULL);
 		else
-			write_optarg(opts + opti, opts[opti].assign_val);
+			write_optarg(opts + l.opti, opts[l.opti].assign_val);
 	else {
 		struct optarg_handled const oh =
-			handle_optarg(opts + opti, long_arg, argv + argi);
-		CHECK_ARGNFOUND("--%s", longopt);
+			handle_optarg(opts + l.opti, l.arg, argv + argi);
+		CHECK_ARGNFOUND(opts[l.opti], "--%s", longopt);
 		argi += oh.argi;
-		CHECK_TRAILING_JUNK("--%s", longopt, long_arg);
+		CHECK_TRAILING_JUNK("--%s", longopt, l.arg);
 	}
 
 	return argi;
@@ -663,7 +763,7 @@ found:		if (opts[opti].type == ENUM_ARG)
 		else {
 			struct optarg_handled const oh =
 				handle_optarg(opts + opti, *optstr ? optstr : NULL, argv + argi);
-			CHECK_ARGNFOUND("-%lc", wc);
+			CHECK_ARGNFOUND(opts[opti], "-%lc", wc);
 			argi += oh.argi;
 			if (oh.argi) {
 				CHECK_TRAILING_JUNK("-%lc", wc, argv[argi - 1]);

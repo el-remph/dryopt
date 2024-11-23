@@ -72,6 +72,8 @@ Usage: "*[[:punct:]]$exename*' [OPTS] [ARGS]
   -F, --float=FLOATING           set fl (double)
   -e, --enum=never,auto,always   pick one of a predetermined set of arguments
   -c, --callback=[ARG]           call callback
+  -f, --conf-file=ARG            set option values from ARG. Repeated uses of
+                                 this option are cumulative
   -h, -?, --help                 Print this help and exit')
 		;;
 	*)
@@ -160,3 +162,6 @@ arguments after options:	-'	\
 do_test '-v 0	-b 0	-s (null)	-n 0	-F 0
 arguments after options:	-'	\
 	-b -
+
+do_test '-v -100	-b 2	-s example string	-n 1	-F 0
+arguments after options:' --conf-file `dirname $0`/test.conf
