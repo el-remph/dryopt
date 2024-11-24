@@ -1,4 +1,4 @@
-*.o
+*.[oa]
 tests/test-bin
 tests/test-mask
 examples/as-bin

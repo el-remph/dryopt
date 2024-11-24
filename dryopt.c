@@ -12,9 +12,8 @@ GNU C:	variadic macro fallback, enum bitfields (widely available and
 	probably a WONTFIX)
 */
 
-#define _POSIX_C_SOURCE 200809l // strdup(3), getline(3)
-
 #include "dryopt.h"
+#include "common.h"
 
 #include <assert.h>
 #include <ctype.h>	/* isspace(3) */
@@ -52,7 +51,7 @@ dryopt_cmp(struct dryopt const *restrict const a, struct dryopt const *restrict 
 }
 #endif
 
-static void __attribute__((cold, format(__printf__, 1, 2)))
+extern void __attribute__((cold, format(__printf__, 1, 2)))
 err_(const char *restrict const fmt, ...)
 {
 	va_list va;
@@ -72,14 +71,12 @@ err_(const char *restrict const fmt, ...)
 
 #if __STDC_VERSION__ < 199900l && defined __GNUC__
 #  define ERR(fmt, args...) err_("%s: " fmt "\n", prognam, args)
-#  define CONF_ERR(fmt, args...) err_("%s: %s: line %llu: " fmt "\n", prognam, filename, line_i, args)
 #else
 #  define ERR(fmt, ...) err_("%s: " fmt "\n", prognam, __VA_ARGS__)
-#  define CONF_ERR(fmt, ...) err_("%s: %s: line %llu: " fmt "\n", prognam, filename, line_i, __VA_ARGS__)
 #endif
 
 #define ENUM_MAP_ENTRY(enum_val) [enum_val] = #enum_val
-static char const *__attribute__((__const__, returns_nonnull))
+extern char const *__attribute__((__const__, returns_nonnull))
 enum_type2str(enum dryarg_tag const tag)
 {
 	/* Array size specified, so in the unlikely event that some borked compiler
@@ -313,7 +310,7 @@ get_target(struct dryopt const *const opt)
 	return target;
 }
 
-static void
+extern void
 write_optarg(struct dryopt const *restrict const opt, union dryoptarg arg)
 /* If calling this without first calling parse_optarg() (such as if
    opt->takes_arg == NO_ARG), *BEWARE* opt->type == CALLBACK */
@@ -380,7 +377,7 @@ write_optarg(struct dryopt const *restrict const opt, union dryoptarg arg)
 	}
 }
 
-static char *__attribute__((nonnull, pure, returns_nonnull))
+extern char *__attribute__((nonnull, pure, returns_nonnull))
 eat_space(char const * str)
 {
 	while (isspace((unsigned)*str))
@@ -397,7 +394,7 @@ str_n_isnegative(char const * str)
 	return *eat_space(str) == '-';
 }
 
-static char *__attribute__((nonnull))
+extern char *__attribute__((nonnull))
 parse_optarg(struct dryopt const *restrict const opt, char *restrict optstr,
 		union dryoptarg *restrict const parsed)
 /* returns optstr after the argument was parsed, or NULL if no argument was
@@ -547,7 +544,7 @@ static struct optarg_handled {
 	return ret;
 }
 
-static struct found_longopt { size_t opti; char * arg; }
+extern struct found_longopt
 find_longopt(char *const longopt, struct dryopt opts[], size_t const optn)
 // This is for code common to dryopt_config_file() and parse_longopt()
 {
@@ -583,83 +580,6 @@ find_longopt(char *const longopt, struct dryopt opts[], size_t const optn)
 found:	if (opts[r.opti].type == ENUM_ARG)
 		opts[r.opti].takes_arg = REQ_ARG;
 	return r;
-}
-
-static bool __attribute__((pure))
-is_conf_comment(char const c)
-{
-	switch (c) {
-	case '#': case ';': case 0:
-		return true;
-	default:
-		return false;
-	}
-}
-
-extern void
-dryopt_config_file (
-	FILE *restrict const conf, char const *restrict const filename, // used by CONF_ERR
-	struct dryopt opts[], size_t const optn
-) {
-	long long unsigned line_i = 1;
-	size_t getline_n = 0;
-	ssize_t len;
-	char * line = NULL;
-
-	/* This doesn't support embedded NUL bytes */
-	for (; (len = getline(&line, &getline_n, conf)) != -1; line_i++) {
-		// In perl: chomp
-		line[len - 1] = '\0';
-
-		// In sed: /^(\s*[;#]|$)/d. Or more accurately, s/^\s*//;/^[^;#]/!d
-		char *const longopt = eat_space(line);
-		if (is_conf_comment(*longopt))
-			continue;
-
-		struct found_longopt l = find_longopt(longopt, opts, optn);
-		if (l.opti == (size_t)-1 && l.arg == NULL) {
-			CONF_ERR("unrecognised option: %s", longopt);
-			continue;
-		}
-		if (l.opti == (size_t)-2)
-			continue; // already handled
-
-		if (!l.arg)
-			/* there is, ironically, some code repetition between here and
-			   parse_longopt() */
-			if (opts[l.opti].takes_arg == REQ_ARG)
-				CONF_ERR("missing %s argument to `%s'", enum_type2str(opts[l.opti].type), longopt);
-			else if (opts[l.opti].type == CALLBACK)
-				opts[l.opti].callback(opts + l.opti, NULL);
-			else
-				write_optarg(opts + l.opti, opts[l.opti].assign_val);
-		else
-			if (opts[l.opti].takes_arg == NO_ARG)
-				CONF_ERR("option `%s' does not take an argument", longopt);
-			else if (opts[l.opti].type == STR) {
-				/* Have to strdup(3), as if we lose the pointer to the
-				   beginning of the buffer, it can't be freed */
-				char * newstr = strdup(l.arg);
-				if (newstr)
-					*(void**)opts[l.opti].argptr = newstr;
-				else
-					CONF_ERR("%s", strerror(errno));
-			} else {
-				union dryoptarg parsed;
-				char * leftover = parse_optarg(opts + l.opti, l.arg, &parsed);
-				if (!leftover)
-					CONF_ERR("%s: %s", strerror(EINVAL), l.arg);
-				leftover = eat_space(leftover);
-				if (!is_conf_comment(*leftover))
-					CONF_ERR("byte %lu: trailing junk after argument to option `%s': %s",
-						leftover - line, longopt, leftover);
-				/* if err_() doesn't exit(3), then imitate parse_longopt()'s
-				   behaviour and just carry on */
-				write_optarg(opts + l.opti, parsed);
-			}
-	}
-
-	free(line);
 }
 
 #define CHECK_ARGNFOUND(entry, optfmt, opt)				\

@@ -16,7 +16,7 @@ churning out lines of boilerplate getopt(3) code.
   Solaris, UCS-2 on W*ndows); respects locale
 - No heap allocation (except for specific, optional scenarios[^mem]), and
   not too intrusive with the globals
-- Single-{source,header,object}
+- Compiled package is a single library and header
 
 [^mem]:	stdio (which may allocate to the heap) is used in `--help` generation
 	and config file parsing, both of which have to be explicitly invoked.
